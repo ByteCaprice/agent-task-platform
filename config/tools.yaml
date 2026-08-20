@@ -1,0 +1,32 @@
+tools:
+  - name: example-weather
+    version: 1.0.0
+    description: Return deterministic sample weather data.
+    endpoint:
+      protocol: python
+      target: plugins.tools.weather:get_weather
+    allowed_agents: [calculator-agent]
+    input_schema:
+      type: object
+      properties:
+        city: {type: string}
+        date: {type: [string, 'null']}
+      required: [city]
+      additionalProperties: false
+    output_schema:
+      type: object
+  - name: example-calculator
+    version: 1.0.0
+    description: Evaluate a simple arithmetic expression.
+    endpoint:
+      protocol: python
+      target: plugins.tools.calculator:calculate
+    allowed_agents: [calculator-agent]
+    input_schema:
+      type: object
+      properties:
+        expression: {type: string}
+      required: [expression]
+      additionalProperties: false
+    output_schema:
+      type: object

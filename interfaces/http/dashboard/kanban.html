@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Agent Task Platform Run Board</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/kanban/assets/kanban.css?v=20260713-4">
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand-block">
+      <div class="brand-mark" aria-hidden="true">A1</div>
+      <div>
+        <h1>Agent Task Platform Run Board</h1>
+        <div class="brand-name">Agent operations</div>
+      </div>
+    </div>
+    <div class="connection-bar">
+      <div id="connection-status" class="connection-status" role="status">
+        <span class="connection-dot" aria-hidden="true"></span>
+        <span>Connecting</span>
+      </div>
+      <button id="refresh-button" class="button" type="button">Refresh</button>
+    </div>
+  </header>
+
+  <main>
+    <section id="summary" class="summary-band" aria-label="Run summary"></section>
+
+    <section class="toolbar" aria-label="Board filters">
+      <label class="field search-field">
+        <span>Search</span>
+        <input id="search" type="search" placeholder="Run, request, route tag, caller">
+      </label>
+      <label class="field">
+        <span>Route tag</span>
+        <select id="route-tag"><option value="">All route tags</option></select>
+      </label>
+      <label class="field">
+        <span>Agent</span>
+        <select id="agent"><option value="">All agents</option></select>
+      </label>
+      <label class="field">
+        <span>Caller</span>
+        <select id="caller"><option value="">All callers</option></select>
+      </label>
+      <label class="field">
+        <span>Status</span>
+        <select id="status"><option value="">All statuses</option></select>
+      </label>
+      <label class="field sort-field">
+        <span>Sort</span>
+        <select id="sort">
+          <option value="priority">Priority</option>
+          <option value="newest">Newest</option>
+          <option value="oldest">Oldest</option>
+          <option value="longest">Longest running</option>
+        </select>
+      </label>
+      <fieldset class="density-control">
+        <legend>Density</legend>
+        <div class="segmented-control">
+          <button type="button" data-density="compact">Compact</button>
+          <button class="is-active" type="button" data-density="comfortable">Comfortable</button>
+        </div>
+      </fieldset>
+      <label class="toggle-field">
+        <input id="auto-refresh" type="checkbox" checked>
+        <span>Auto refresh</span>
+      </label>
+      <div id="updated-at" class="updated-at" role="status">Loading</div>
+    </section>
+
+    <div id="error-banner" class="error-banner" role="alert" hidden></div>
+    <section id="board" class="board" aria-label="Agent run Kanban board"></section>
+  </main>
+
+  <div id="drawer-backdrop" class="drawer-backdrop" hidden></div>
+  <aside id="run-drawer" class="run-drawer" aria-label="Run details" aria-hidden="true">
+    <header class="drawer-header">
+      <div class="drawer-heading">
+        <span id="drawer-status" class="status-badge"></span>
+        <h2 id="drawer-title">Run details</h2>
+        <code id="drawer-run-id"></code>
+      </div>
+      <button id="drawer-close" class="button button-icon" type="button" title="Close run details" aria-label="Close run details">X</button>
+    </header>
+    <div id="drawer-metrics" class="drawer-metrics"></div>
+    <div id="drawer-actions" class="drawer-actions"></div>
+    <nav class="drawer-tabs" aria-label="Run detail views">
+      <button class="drawer-tab is-active" type="button" data-tab="overview">Overview</button>
+      <button class="drawer-tab" type="button" data-tab="input">Input</button>
+      <button class="drawer-tab" type="button" data-tab="output">Output</button>
+      <button class="drawer-tab" type="button" data-tab="timeline">Timeline</button>
+    </nav>
+    <div id="drawer-content" class="drawer-content"></div>
+  </aside>
+
+  <script src="/kanban/assets/kanban.js?v=20260713-4" defer></script>
+</body>
+</html>

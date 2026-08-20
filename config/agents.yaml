@@ -1,0 +1,24 @@
+agents:
+  - name: echo-agent
+    version: 1.0.0
+    description: Return the submitted input without external dependencies.
+    route_tags: [example.echo]
+    runtime:
+      type: echo
+    input_schema:
+      type: object
+    output_schema:
+      type: object
+  - name: calculator-agent
+    version: 1.0.0
+    description: Demonstrate governed local tool calls.
+    route_tags: [example.calculator]
+    tools: [example-weather, example-calculator]
+    permissions: [tool:example-weather, tool:example-calculator]
+    runtime:
+      type: python
+      target: agent_hub.example_tool_agent:create_agent
+    input_schema:
+      type: object
+    output_schema:
+      type: object
