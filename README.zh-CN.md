@@ -6,6 +6,12 @@ Agent Task Platform 是一个面向生产环境的、以 Task/Run 为核心的�
 
 调用方提交任务后会立即获得 Run 标识；平台异步执行任务，并持久化执行状态、重试、Stage、工具调用、模型调用、日志、输出与 Callback 投递记录。因此进程重启后仍可恢复任务执行。
 
+## 为什么以 Task 和 Run 为核心？
+
+许多开源 Agent 框架以 Chat 或 Session 作为主要工作单元。Agent Task Platform 则以可持久化的 Task 和 Run 为起点：调用方提交工作，平台创建执行记录，Worker 可以在不依赖单个 HTTP 连接的情况下完成排队、重试、恢复、取消、观测与结果投递。
+
+Chat 或 Session 上下文仍然可以服务于某个 Agent，但它是可选的上下文组织方式，而不是调度和可靠性的根实体。这个定位更适合异步工作流、长时间执行的操作，以及需要可审计结果的系统集成。
+
 它适用于需要可靠执行与可观测性的异步 Agent 工作流，而不是以聊天会话为中心的框架。
 
 ## 核心能力
@@ -107,3 +113,7 @@ uv run python scripts/gen_sql.py
 ## 当前状态
 
 项目正在准备首个公开版本。在发布稳定版本前，不应将当前 API、插件契约或数据库 Schema 视为长期稳定接口。
+
+## 许可证
+
+Copyright 2026 ByteCaprice。本项目使用 [Apache License 2.0](LICENSE)。

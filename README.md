@@ -6,6 +6,12 @@ Agent Task Platform is a durable, task/run-oriented platform for building and op
 
 Submit a task, receive a Run identifier immediately, and retrieve the result later. The platform persists execution state, retries, stages, tool calls, model calls, logs, and callback delivery so work can recover after a process restart.
 
+## Why Task and Run?
+
+Many open-source agent frameworks begin with a chat or session as their primary unit of work. Agent Task Platform starts with a durable Task and Run instead: a caller submits work, the platform creates a persisted execution record, and workers can queue, retry, recover, cancel, observe, and deliver its result independently of an HTTP connection.
+
+Chat or session context can still be useful for an Agent, but it is optional context organization rather than the scheduling and reliability root. This focus makes the platform a good fit for asynchronous workflows, long-running operations, and integrations that need an auditable outcome.
+
 It is intended for asynchronous, observable agent work rather than a chat-session abstraction.
 
 ## Highlights
@@ -107,3 +113,7 @@ uv run python scripts/gen_sql.py
 ## Status
 
 This project is preparing for its first public release. Do not treat the current API, plugin contracts, or database schema as stable until a versioned release is published.
+
+## License
+
+Copyright 2026 ByteCaprice. Licensed under the [Apache License 2.0](LICENSE).
