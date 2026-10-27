@@ -7,12 +7,14 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from domain import AgentSpec, SkillArtifactFile, ToolSpec
 from framework.registry import RegistryError
 from framework.tool.health import check_agent_health, check_tool_health
 from interfaces.http.dependencies import require_scope
+from interfaces.http.errors import APIError
+from interfaces.settings import SettingsValidationError
 
 router = APIRouter(dependencies=[Depends(require_scope("admin"))])
 
@@ -172,7 +174,22 @@ async def disable_skill(request: Request, name: str, version: str) -> list[dict[
 
 @router.post("/v1/admin/reload-config")
 async def reload_config(request: Request) -> dict[str, int]:
-    return request.app.state.config_watcher.reload_all()
+    try:
+        return request.app.state.config_watcher.reload_all()
+    except ValidationError as exc:
+        fields = sorted({".".join(map(str, error["loc"])) for error in exc.errors(include_input=False)})
+        raise APIError(
+            code="VALIDATION_ERROR",
+            message="Platform configuration validation failed",
+            status_code=422,
+            details={"fields": fields},
+        ) from None
+    except SettingsValidationError:
+        raise APIError(
+            code="VALIDATION_ERROR",
+            message="Platform configuration contains unsupported or bootstrap-only settings",
+            status_code=422,
+        ) from None
 
 
 @router.post("/v1/admin/maintenance/prune")

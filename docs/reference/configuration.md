@@ -63,3 +63,41 @@ Callbacks are optional. Model settings are only required for Agents that invoke 
 ## Registries
 
 Agent, Tool, and Skill definitions are persisted in PostgreSQL. `config/agents.yaml`, `config/tools.yaml`, and `config/skills.yaml` are optional public seed inputs. Existing database entries remain authoritative.
+
+## Database-managed Runtime Configuration
+
+Runtime settings remain file/environment-driven by default. To make settings that are safe to change at runtime database-managed, enable:
+
+```dotenv
+PLATFORM_CONFIG__DATABASE_MANAGED=true
+PLATFORM_CONFIG__INITIALIZE_IF_MISSING=true
+```
+
+On first startup, the platform validates the effective bootstrap settings and initializes four normalized tables:
+
+| Table | Contents |
+|---|---|
+| `ai_runtime_config` | Worker, queue, rate-limit, watcher, dashboard, logging, and retention controls |
+| `ai_model_config` | Default model endpoint, credential, model, timeout, retry, and fallback settings |
+| `ai_callback_config` | Callback retry, signing, allowlist, channel, and dispatcher settings |
+| `ai_api_key_config` | Inbound API keys, scopes, and enabled state |
+
+Initialization happens once and does not overwrite existing rows. Later database changes are detected by `ConfigWatcher` and applied to new work without a process restart. Model, callback, worker, rate-limit, API-key, logging, and watcher settings can reload live. Queue limits reload only while no Run holds a scheduler slot.
+
+Database connection details, server binding, coordination settings, Worker identity, and log file location remain bootstrap-only because they are needed before database configuration can be read or are process-local. Set `PLATFORM_CONFIG__INITIALIZE_IF_MISSING=false` when operators must initialize the normalized rows explicitly; startup then fails if they are absent.
+
+Credentials stored in these tables are plaintext application secrets. Restrict table access, database logs, backups, and administrative access accordingly.
+
+## File Logging
+
+The CLI always logs to stdout. Daily, size-limited files are optional:
+
+```dotenv
+LOGGING__FILE_ENABLED=true
+LOGGING__DIRECTORY=logs
+LOGGING__MAX_FILE_SIZE_MB=100
+LOGGING__RETENTION_DAYS=30
+LOGGING__LEVEL=info
+```
+
+Relative directories are resolved from the project directory containing `config/`. Files use names such as `api.2026-10-27.log` and `api.2026-10-27.1.log`; expired calendar days are removed when a handler starts or the date changes.

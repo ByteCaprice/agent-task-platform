@@ -34,6 +34,13 @@ from infra.store.repository.config_repository import AgentConfigRepository, Skil
 from infra.store.repository.conversation import ConversationRepository
 from infra.store.repository.log import LogRepository
 from infra.store.repository.model_call import ModelCallRepository
+from infra.store.repository.platform_config import PlatformConfigRepository
+from infra.store.repository.platform_settings import (
+    ApiKeyConfigRepository,
+    CallbackConfigRepository,
+    ModelConfigRepository,
+    RuntimeConfigRepository,
+)
 from infra.store.repository.run import RunRepository
 from infra.store.repository.stage import StageRepository
 
@@ -56,6 +63,17 @@ class SqlAlchemyRunStore:
         self.agents = AgentConfigRepository(self._sf)
         self.tools = ToolConfigRepository(self._sf)
         self.skills = SkillConfigRepository(self._sf)
+        self.runtime_configs = RuntimeConfigRepository(self._sf)
+        self.model_configs = ModelConfigRepository(self._sf)
+        self.callback_configs = CallbackConfigRepository(self._sf)
+        self.api_key_configs = ApiKeyConfigRepository(self._sf)
+        self.platform_configs = PlatformConfigRepository(
+            self._sf,
+            runtime_configs=self.runtime_configs,
+            model_configs=self.model_configs,
+            callback_configs=self.callback_configs,
+            api_key_configs=self.api_key_configs,
+        )
 
     # ------------------------------------------------------------------
     # Lifecycle

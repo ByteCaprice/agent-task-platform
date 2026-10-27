@@ -12,7 +12,7 @@ from collections import defaultdict
 from typing import Any
 
 from domain import AgentRun, LogEvent, RunSubmission, utc_now
-from domain.enums import CallbackStatus, ErrorType, RunStatus
+from domain.enums import ErrorType, RunStatus
 from domain.enums.run import EXECUTING_RUN_STATUSES, TERMINAL_RUN_STATUSES
 from framework.registry import AgentRegistry
 from framework.runtime import AgentRuntime
@@ -68,7 +68,7 @@ class RunManager:
         if hasattr(runtime, "run_manager") and runtime.run_manager is None:
             runtime.run_manager = self
 
-    async def submit(self, submission: RunSubmission) -> AgentRun:
+    async def submit(self, submission: RunSubmission, *, start: bool | None = None) -> AgentRun:
         run, is_new = self.run_service.submit(submission)
         if run.metadata and (parent_id := run.metadata.get("parent_run_id")):
             with self._cancellation_lock:
@@ -82,7 +82,8 @@ class RunManager:
             is_new,
             run.status,
         )
-        if self.auto_start and is_new and run.status == RunStatus.QUEUED:
+        should_start = self.auto_start if start is None else start
+        if should_start and is_new and run.status == RunStatus.QUEUED:
             self._start_background(run.run_id)
         return run
 
@@ -223,18 +224,9 @@ class RunManager:
         return len(records)
 
     async def compensate_callbacks(self, limit: int = 100) -> int:
-        compensated = 0
-        compensated += await self.callback_service.dispatch_pending(limit=limit)
-        runs = self.store.runs.list_by_status([RunStatus.WAITING_CALLBACK], limit=limit)
-        for run in runs:
-            if run.callback_status != CallbackStatus.FAILED:
-                continue
-            try:
-                await self.callback_service.resend(run)
-                compensated += 1
-            except Exception:
-                pass
-        return compensated
+        # Retry pending work and interrupted failures with attempts remaining.
+        # Exhausted deliveries require an explicit operator resend.
+        return await self.callback_service.dispatch_pending(limit=limit)
 
     def dispatch_ready(self, *, worker_id: str, lease_seconds: float, limit: int = 20) -> int:
         claimed = self.store.runs.claim_ready(

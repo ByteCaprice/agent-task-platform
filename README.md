@@ -23,6 +23,8 @@ It is intended for asynchronous, observable agent work rather than a chat-sessio
 - Versioned Skills with immutable snapshots attached to each Run
 - OpenAI-compatible model gateway with fallback, usage, and audit records
 - Signed callbacks, outbound URL controls, structured logs, and scoped API keys
+- Optional normalized database configuration with live runtime reload
+- Daily and size-based rotating file logs with retention
 
 ## Quick Start
 
@@ -72,12 +74,14 @@ The response is `202 Accepted` and includes `run_id`, `trace_id`, and `conversat
 
 - [Getting Started](docs/getting-started.md)
 - [Architecture](docs/architecture.md)
+- [Technical Report](TECHNICAL_REPORT.md)
 - [Task and Run Concepts](docs/concepts/task-and-run.md)
 - [Durable Stages](docs/concepts/durable-stages.md)
 - [Tools and Skills](docs/concepts/tools-and-skills.md)
 - [Configuration](docs/reference/configuration.md)
 - [HTTP API](docs/reference/http-api.md)
 - [Build an Agent or Tool](docs/guides/build-an-extension.md)
+- [Integrate Skills](docs/guides/integrate-skills.md)
 - [Deployment](docs/guides/deployment.md)
 - [Security Model](docs/security/threat-model.md)
 

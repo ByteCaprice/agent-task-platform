@@ -5,15 +5,15 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import logging
 import os
 import sys
 from typing import Any
 
 import uvicorn
+from fastapi import FastAPI
 
-from framework.observability import install_request_trace_log_record_factory
 from interfaces.http.server import create_app
+from interfaces.logging_config import configure_logging
 from interfaces.settings import load_settings
 
 
@@ -30,12 +30,16 @@ def main(argv: list[str] | None = None) -> None:
 
 def _run_server(args: argparse.Namespace) -> None:
     settings = _load_settings(args.config_dir)
-    _configure_logging(settings)
     server_settings = settings.get("server", {})
     host = _option(args.host, server_settings.get("host"), "127.0.0.1")
     port = int(_option(args.port, server_settings.get("port"), 8765))
     reload = bool(_option(args.reload, server_settings.get("reload"), False))
     if reload:
+        parent_settings = {
+            **settings,
+            "logging": {**settings.get("logging", {}), "file_enabled": False},
+        }
+        _configure_logging(parent_settings, "api", config_dir=args.config_dir)
         os.environ["AGENT_TASK_PLATFORM_CONFIG_DIR"] = args.config_dir
         uvicorn.run(
             "interfaces.cli.main:create_app_for_uvicorn",
@@ -44,19 +48,25 @@ def _run_server(args: argparse.Namespace) -> None:
             port=port,
             reload=True,
             log_level=_log_level(settings),
+            log_config=None,
         )
         return
+    _configure_logging(settings, "api", config_dir=args.config_dir)
     app = create_app(args.config_dir)
     uvicorn.run(
         app,
         host=host,
         port=port,
         log_level=_log_level(settings),
+        log_config=None,
     )
 
 
 def create_app_for_uvicorn():
-    return create_app(os.environ.get("AGENT_TASK_PLATFORM_CONFIG_DIR", "config"))
+    config_dir = os.environ.get("AGENT_TASK_PLATFORM_CONFIG_DIR", "config")
+    settings = _load_settings(config_dir)
+    _configure_logging(settings, "api", config_dir=config_dir)
+    return create_app(config_dir)
 
 
 def worker_main(argv: list[str] | None = None) -> None:
@@ -68,10 +78,10 @@ def worker_main(argv: list[str] | None = None) -> None:
 
 def _run_worker(args: argparse.Namespace) -> None:
     settings = _load_settings(args.config_dir)
-    _configure_logging(settings)
-    worker_settings = settings.get("worker", {})
+    _configure_logging(settings, "worker", config_dir=args.config_dir)
     app = create_app(args.config_dir, auto_start=False)
     worker = app.state.worker
+    worker_settings = app.state.settings.get("worker", {})
     worker.poll_interval_seconds = float(
         _option(
             args.poll_interval_seconds,
@@ -84,7 +94,28 @@ def _run_worker(args: argparse.Namespace) -> None:
         _option(args.lease_seconds, worker_settings.get("lease_seconds"), worker.lease_seconds)
     )
     worker.worker_id = str(_option(args.worker_id, worker_settings.get("worker_id"), worker.worker_id))
-    asyncio.run(worker.run_forever())
+    asyncio.run(_run_worker_loop(app))
+
+
+async def _run_worker_loop(app: FastAPI) -> None:
+    """Run worker and database configuration watcher in one process."""
+    worker = app.state.worker
+    watcher = app.state.config_watcher
+    async with app.router.lifespan_context(app):
+        worker_task = asyncio.create_task(worker.run_forever())
+        watcher_task = asyncio.create_task(watcher.run_forever())
+        try:
+            done, _ = await asyncio.wait({worker_task, watcher_task}, return_when=asyncio.FIRST_COMPLETED)
+            for task in done:
+                await task
+            if watcher_task in done and worker_task not in done:
+                raise RuntimeError("Worker configuration watcher stopped unexpectedly")
+        finally:
+            worker.stop()
+            watcher.stop()
+            worker_task.cancel()
+            watcher_task.cancel()
+            await asyncio.gather(worker_task, watcher_task, return_exceptions=True)
 
 
 def _check_config(args: argparse.Namespace) -> None:
@@ -107,15 +138,13 @@ def _load_settings(config_dir: str) -> dict[str, Any]:
     return load_settings(config_dir)
 
 
-def _configure_logging(settings: dict[str, Any]) -> None:
-    install_request_trace_log_record_factory()
-    logging.basicConfig(
-        level=getattr(logging, _log_level(settings).upper(), logging.INFO),
-        format="%(asctime)s %(levelname)s req_id=%(req_id)s %(name)s - %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-        stream=sys.stdout,
-        force=True,
-    )
+def _configure_logging(
+    settings: dict[str, Any],
+    service_name: str = "api",
+    *,
+    config_dir: str | None = None,
+) -> None:
+    configure_logging(settings, service_name, config_dir=config_dir)
 
 
 def _log_level(settings: dict[str, Any]) -> str:

@@ -25,17 +25,24 @@ class CallbackRepository(BaseRepository):
         *,
         worker_id: str,
         lease_seconds: float,
+        max_attempts: int | None = None,
         limit: int = 20,
     ) -> list[CallbackDelivery]:
         now = utc_now()
         lease_expire_time = now + timedelta(seconds=lease_seconds)
+        retryable_status = AiCallback.status == CallbackStatus.PENDING.value
+        if max_attempts is not None:
+            retryable_status = or_(
+                retryable_status,
+                (AiCallback.status == CallbackStatus.FAILED.value) & (AiCallback.attempts < max_attempts),
+            )
         claimed: list[CallbackDelivery] = []
         with self._sf.begin() as s:
             entities = (
                 s.execute(
                     select(AiCallback)
                     .where(
-                        AiCallback.status == CallbackStatus.PENDING.value,
+                        retryable_status,
                         or_(AiCallback.run_after.is_(None), AiCallback.run_after <= now),
                         or_(
                             AiCallback.worker.is_(None),

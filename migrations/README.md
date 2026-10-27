@@ -6,6 +6,8 @@ Agent Task Platform uses Alembic for PostgreSQL schema changes. Application star
 
 The public migration history starts at `versions/0001_platform_baseline.py`. It creates the schema from the SQLAlchemy metadata in `infra/store/model/`.
 
+`versions/0002_normalized_platform_config.py` adds the optional normalized runtime, model, callback, and inbound API-key configuration tables.
+
 ## Commands
 
 ```bash

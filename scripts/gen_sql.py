@@ -171,7 +171,7 @@ def gen_seed(env: dict[str, str] | None = None, managed_by: str | None = None) -
             spec.managed_by = managed_by
         lines.append(_upsert(AiSkillConfig.from_domain(spec)))
         lines.append("")
-    return "\n".join(lines) + "\n"
+    return "\n".join(lines).rstrip() + "\n"
 
 
 def _parse_env(pairs: list[str]) -> dict[str, str]:

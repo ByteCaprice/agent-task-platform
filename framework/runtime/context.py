@@ -138,6 +138,7 @@ class AgentContext:
         version: str | None = None,
         timeout_seconds: float | None = None,
         agent_spec: AgentSpec | None = None,
+        files: list[Any] | None = None,
     ) -> dict[str, Any]:
         """Execute a specialist child run through RunManager/Scheduler/Executor.
 
@@ -266,6 +267,7 @@ class AgentContext:
                     agent_version=target_spec.version,
                     request_id=child_req_id,
                     input=input_data,
+                    files=list(self.files if files is None else files),
                     timeout_seconds=int(child_timeout),
                     metadata={
                         **self.metadata,
@@ -275,7 +277,7 @@ class AgentContext:
                         "parent_stage_key": effective_stage_key,
                     },
                 )
-                child_run = await run_manager.submit(submission)
+                child_run = await run_manager.submit(submission, start=False)
                 try:
                     completed_run = await run_manager.run_now(child_run.run_id)
                 except (asyncio.CancelledError, RunCancelledError):

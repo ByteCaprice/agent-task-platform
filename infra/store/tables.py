@@ -13,10 +13,14 @@ from infra.store.model import (
     AiAgentConfig,
     AiAgentRun,
     AiAgentStage,
+    AiApiKeyConfig,
     AiCallback,
+    AiCallbackConfig,
     AiConversation,
     AiModelCall,
+    AiModelConfig,
     AiRunLog,
+    AiRuntimeConfig,
     AiSkillConfig,
     AiToolConfig,
     metadata,
@@ -31,6 +35,10 @@ model_calls = AiModelCall.__table__
 agent_configs = AiAgentConfig.__table__
 tool_configs = AiToolConfig.__table__
 skill_configs = AiSkillConfig.__table__
+runtime_configs = AiRuntimeConfig.__table__
+model_configs = AiModelConfig.__table__
+callback_configs = AiCallbackConfig.__table__
+api_key_configs = AiApiKeyConfig.__table__
 
 ALL_TABLES = [
     runs,
@@ -42,6 +50,10 @@ ALL_TABLES = [
     agent_configs,
     tool_configs,
     skill_configs,
+    runtime_configs,
+    model_configs,
+    callback_configs,
+    api_key_configs,
 ]
 
 __all__ = [
@@ -55,5 +67,9 @@ __all__ = [
     "agent_configs",
     "tool_configs",
     "skill_configs",
+    "runtime_configs",
+    "model_configs",
+    "callback_configs",
+    "api_key_configs",
     "ALL_TABLES",
 ]

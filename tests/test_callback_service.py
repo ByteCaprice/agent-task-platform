@@ -41,7 +41,14 @@ class _HttpClient:
         self.responses = responses
         self.requests: list[dict[str, Any]] = []
 
-    async def post(self, url: str, *, content: bytes, headers: dict[str, str]) -> _Response:
+    async def post(
+        self,
+        url: str,
+        *,
+        content: bytes,
+        headers: dict[str, str],
+        timeout: float | None = None,
+    ) -> _Response:
         self.requests.append({"url": url, "content": content, "headers": headers})
         return self.responses.pop(0)
 
@@ -163,6 +170,41 @@ def test_callback_dispatch_retries_and_keeps_task_waiting_when_ack_invalid(tmp_p
         "callback_failed",
         "callback_failed",
     ]
+
+    # Startup compensation must not reset and replay an exhausted delivery.
+    assert asyncio.run(service.dispatch_pending()) == 0
+    assert len(http_client.requests) == 2
+
+
+def test_callback_dispatch_pending_resumes_interrupted_retry(tmp_path) -> None:
+    store = SqliteRunStore(tmp_path / "runs.db")
+    http_client = _HttpClient([_Response({"ackStatus": "RECEIVED", "reason": "OK"})])
+    service = CallbackService(
+        store=store,
+        max_attempts=2,
+        backoff_seconds=0,
+        url_allowlist=["https://callback.test/"],
+        http_client=http_client,
+    )
+    run = _callback_task(status=RunStatus.WAITING_CALLBACK)
+    run.callback_status = CallbackStatus.FAILED
+    store.runs.create(run)
+    store.callbacks.save(
+        CallbackDelivery(
+            event_id="EVENT-interrupted",
+            run_id=run.run_id,
+            trace_id=run.trace_id,
+            url=str(run.callback.url),
+            status=CallbackStatus.FAILED,
+            attempts=1,
+            payload=service._payload(run, "EVENT-interrupted"),
+        )
+    )
+
+    assert asyncio.run(service.dispatch_pending()) == 1
+    delivered = store.callbacks.get("EVENT-interrupted")
+    assert delivered.status == CallbackStatus.DELIVERED
+    assert delivered.attempts == 2
 
 
 def test_callback_retry_backoff_supports_exponential_and_fixed() -> None:

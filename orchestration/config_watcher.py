@@ -3,18 +3,21 @@
 in-memory registries at runtime.
 
 The DB is the source of truth (YAML is only a startup seed; see
-``server._load_agent_registry``).  Any writer of the DB — the admin API, a DBA
-running per-env seed SQL, or another node — is picked up here.  Settings
-(``.env`` / ``settings.yaml``) remain cold config: a change is logged as a
-warning but not applied, because runtime objects are built at app startup.
+``server._load_agent_registry``). Any writer of the DB is picked up here.
+Platform settings in the normalized ``ai_*_config`` tables are hot-reloaded;
+bootstrap files remain cold config because database and process startup values
+cannot be reconfigured safely.
 """
 
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from pathlib import Path
 
-from domain import LogEvent, new_trace_id
+from pydantic import ValidationError
+
+from domain import LogEvent, PlatformConfig, new_trace_id
 from framework.registry import AgentRegistry, SkillRegistry, ToolRegistry
 from framework.skill.loader import SkillLoader
 from infra.store import RunStore
@@ -31,6 +34,7 @@ class ConfigWatcher:
         skill_loader: SkillLoader | None = None,
         store: RunStore,
         poll_interval_seconds: float = 5.0,
+        platform_config_reloader: Callable[[list[PlatformConfig]], int] | None = None,
     ) -> None:
         self.config_dir = Path(config_dir)
         self.agent_registry = agent_registry
@@ -39,6 +43,7 @@ class ConfigWatcher:
         self.skill_loader = skill_loader
         self.store = store
         self.poll_interval_seconds = poll_interval_seconds
+        self.platform_config_reloader = platform_config_reloader
         self._mtimes: dict[str, float] = {}
         self._running = False
         self.last_error: str | None = None
@@ -136,6 +141,11 @@ class ConfigWatcher:
         )
         return 0
 
+    def _reload_platform_configs(self) -> int:
+        if self.platform_config_reloader is None:
+            return 0
+        return self.platform_config_reloader(self.store.platform_configs.list())
+
     async def run_forever(self) -> None:
         self._mtimes = self._snapshot_mtimes()
         self._running = True
@@ -147,6 +157,7 @@ class ConfigWatcher:
                 self._reload_agents()
                 self._reload_tools()
                 self._reload_skills()
+                self._reload_platform_configs()
                 # Settings files are cold config: only warn on change.
                 current = self._snapshot_mtimes()
                 for filename, mtime in current.items():
@@ -154,7 +165,13 @@ class ConfigWatcher:
                         self._reload_settings()
                 self._mtimes = current
             except Exception as exc:
-                self.last_error = f"{type(exc).__name__}: {exc}"
+                # Pydantic's default text includes the rejected input, which
+                # may contain API keys or signing credentials from a DB row.
+                if isinstance(exc, ValidationError):
+                    fields = sorted({".".join(map(str, error["loc"])) for error in exc.errors(include_input=False)})
+                    self.last_error = f"ValidationError in: {', '.join(fields)}"
+                else:
+                    self.last_error = f"{type(exc).__name__}: {exc}"
                 self.store.logs.add(
                     LogEvent(
                         trace_id=new_trace_id(),
@@ -175,6 +192,7 @@ class ConfigWatcher:
             "agents": self._reload_agents(),
             "tools": self._reload_tools(),
             "skills": self._reload_skills(),
+            "platform_configs": self._reload_platform_configs(),
             "settings": self._reload_settings(),
         }
         return dict(self.last_reload_counts)

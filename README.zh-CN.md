@@ -23,6 +23,8 @@ Chat 或 Session 上下文仍然可以服务于某个 Agent，但它是可选的
 - 带不可变 Run Snapshot 的版本化 Skill
 - 支持 OpenAI-compatible 服务的模型网关、Fallback、用量与审计记录
 - Callback 签名、出站 URL 策略、结构化日志和 scoped API key
+- 可选的规范化数据库配置与运行时热加载
+- 支持保留周期的按日、按大小文件日志轮转
 
 ## 快速开始
 
@@ -72,12 +74,14 @@ curl -X POST http://127.0.0.1:8765/v1/runs \
 
 - [Getting Started](docs/getting-started.md)
 - [Architecture](docs/architecture.md)
+- [技术报告（英文）](TECHNICAL_REPORT.md)
 - [Task 和 Run 概念](docs/concepts/task-and-run.md)
 - [Durable Stages](docs/concepts/durable-stages.md)
 - [Tools 和 Skills](docs/concepts/tools-and-skills.md)
 - [配置参考](docs/reference/configuration.md)
 - [HTTP API](docs/reference/http-api.md)
 - [扩展 Agent 或 Tool](docs/guides/build-an-extension.md)
+- [集成 Skills（英文）](docs/guides/integrate-skills.md)
 - [部署](docs/guides/deployment.md)
 - [安全模型](docs/security/threat-model.md)
 

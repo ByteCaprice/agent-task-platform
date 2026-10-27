@@ -15,7 +15,7 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from domain import AgentSpec, MCPServerSpec, SkillSpec, ToolSpec
+from domain import AgentSpec, MCPServerSpec, PlatformConfig, SkillSpec, ToolSpec
 from framework.model_gateway import ModelGateway
 from framework.registry import AgentRegistry, RegistryError, SkillRegistry, ToolRegistry
 from framework.runtime import AgentRuntime
@@ -44,7 +44,15 @@ from interfaces.http.routes import (
     operations_router,
     runs_router,
 )
-from interfaces.settings import load_settings, validate_settings
+from interfaces.logging_config import reconfigure_logging
+from interfaces.settings import (
+    PLATFORM_CONFIG_NAMESPACES,
+    SettingsValidationError,
+    load_settings,
+    merge_platform_configs,
+    platform_configs_from_settings,
+    validate_settings,
+)
 from orchestration.callback_service import CallbackService
 from orchestration.config_watcher import ConfigWatcher
 from orchestration.kanban_service import KanbanService
@@ -58,10 +66,16 @@ logger = logging.getLogger(__name__)
 def create_app(config_dir: str | Path | None = None, *, auto_start: bool = True) -> FastAPI:
     root = Path(config_dir or "config").resolve()
     os.environ["AGENT_TASK_PLATFORM_CONFIG_DIR"] = str(root)
-    settings = load_settings(root)
+    bootstrap_settings = load_settings(root)
+    validate_settings(bootstrap_settings)
+    store = create_run_store(bootstrap_settings)
+    database_managed = bool(bootstrap_settings.get("platform_config", {}).get("database_managed", False))
+    if database_managed:
+        settings, platform_configs = _load_platform_settings(store, bootstrap_settings)
+    else:
+        settings, platform_configs = bootstrap_settings, []
     for warning in validate_settings(settings):
         logger.warning("settings warning: %s", warning)
-    store = create_run_store(settings)
     hooks = LoggingHooks(store)
     agent_registry = _load_agent_registry(root / "agents.yaml", store)
     tool_registry = _load_tool_registry(root / "tools.yaml", store)
@@ -78,6 +92,8 @@ def create_app(config_dir: str | Path | None = None, *, auto_start: bool = True)
             global_max_concurrency=settings.get("queue", {}).get("global_max_concurrency", 20),
             route_tag_max_concurrency=settings.get("queue", {}).get("route_tags", {}),
             caller_max_concurrency=settings.get("queue", {}).get("callers", {}),
+            max_nested_depth=settings.get("queue", {}).get("max_nested_depth", 3),
+            max_active_children_per_root=settings.get("queue", {}).get("max_active_children_per_root", 5),
         ),
         coordination=coordination,
     )
@@ -120,6 +136,45 @@ def create_app(config_dir: str | Path | None = None, *, auto_start: bool = True)
         batch_size=settings.get("worker", {}).get("batch_size", 20),
         lease_seconds=settings.get("worker", {}).get("lease_seconds", 60),
     )
+    api_key_registry = ApiKeyRegistry(settings.get("auth", {}).get("api_keys", []))
+    active_platform_configs = _platform_config_snapshot(platform_configs)
+
+    def reload_platform_configs(configs: list[PlatformConfig]) -> int:
+        nonlocal active_platform_configs
+        snapshot = _platform_config_snapshot(configs)
+        changed_namespaces = {
+            namespace
+            for namespace in active_platform_configs.keys() | snapshot.keys()
+            if active_platform_configs.get(namespace) != snapshot.get(namespace)
+        }
+        if not changed_namespaces:
+            return 0
+        reloaded = merge_platform_configs(bootstrap_settings, configs)
+        if "queue" in changed_namespaces:
+            scheduler.reconfigure(reloaded.get("queue", {}))
+        if "model" in changed_namespaces:
+            model_gateway.reconfigure(reloaded.get("model", {}))
+        if "callback" in changed_namespaces:
+            callback = reloaded.get("callback", {})
+            callback_service.reconfigure(callback, signing_secret=callback.get("signing_secret"))
+        if "worker" in changed_namespaces:
+            worker.reconfigure(reloaded.get("worker", {}))
+        if "rate_limit" in changed_namespaces:
+            rate_limiter.reconfigure(reloaded.get("rate_limit", {}))
+        if "auth" in changed_namespaces:
+            api_key_registry.reconfigure(reloaded.get("auth", {}).get("api_keys", []))
+            app.state.api_keys = api_key_registry.keys
+        if "logging" in changed_namespaces:
+            reconfigure_logging(reloaded)
+        if "config_watcher" in changed_namespaces:
+            config_watcher.poll_interval_seconds = float(
+                reloaded.get("config_watcher", {}).get("poll_interval_seconds", 5)
+            )
+        settings.clear()
+        settings.update(reloaded)
+        active_platform_configs = snapshot
+        return len(changed_namespaces)
+
     config_watcher = ConfigWatcher(
         config_dir=root,
         agent_registry=agent_registry,
@@ -128,6 +183,7 @@ def create_app(config_dir: str | Path | None = None, *, auto_start: bool = True)
         skill_loader=skill_loader,
         store=store,
         poll_interval_seconds=settings.get("config_watcher", {}).get("poll_interval_seconds", 5),
+        platform_config_reloader=reload_platform_configs if database_managed else None,
     )
 
     @asynccontextmanager
@@ -142,36 +198,37 @@ def create_app(config_dir: str | Path | None = None, *, auto_start: bool = True)
             callback_dispatch_task = asyncio.create_task(
                 _dispatch_callbacks_forever(
                     callback_service,
-                    poll_interval_seconds=settings.get("callback", {}).get("dispatch_poll_interval_seconds", 1),
-                    batch_size=settings.get("callback", {}).get("dispatch_batch_size", 20),
+                    settings=settings,
                 )
             )
-        yield
-        await manager.shutdown(timeout_seconds=settings.get("worker", {}).get("shutdown_timeout_seconds", 10))
-        if hot_reload_task:
-            config_watcher.stop()
-            hot_reload_task.cancel()
-            try:
-                await hot_reload_task
-            except asyncio.CancelledError:
-                pass
-        if callback_dispatch_task:
-            callback_dispatch_task.cancel()
-            try:
-                await callback_dispatch_task
-            except asyncio.CancelledError:
-                pass
-        await _close_http_clients(tool_gateway, model_gateway, runtime, callback_service)
-        close_store = getattr(store, "close", None)
-        if close_store is not None:
-            close_store()
+        try:
+            yield
+        finally:
+            await manager.shutdown(timeout_seconds=settings.get("worker", {}).get("shutdown_timeout_seconds", 10))
+            if hot_reload_task:
+                config_watcher.stop()
+                hot_reload_task.cancel()
+                try:
+                    await hot_reload_task
+                except asyncio.CancelledError:
+                    pass
+            if callback_dispatch_task:
+                callback_dispatch_task.cancel()
+                try:
+                    await callback_dispatch_task
+                except asyncio.CancelledError:
+                    pass
+            await _close_http_clients(tool_gateway, model_gateway, runtime, callback_service)
+            close_store = getattr(store, "close", None)
+            if close_store is not None:
+                close_store()
 
     app = FastAPI(title="Agent Task Platform", lifespan=lifespan)
     install_request_logging_middleware(
         app,
         max_body_chars=int(settings.get("logging", {}).get("max_body_chars", 4096)),
+        settings=settings,
     )
-    api_key_registry = ApiKeyRegistry(settings.get("auth", {}).get("api_keys", []))
     app.state.api_key_registry = api_key_registry
     app.state.api_keys = api_key_registry.keys
     app.state.settings = settings
@@ -219,16 +276,41 @@ def create_app(config_dir: str | Path | None = None, *, auto_start: bool = True)
     return app
 
 
-async def _dispatch_callbacks_forever(
-    callback_service: CallbackService, *, poll_interval_seconds: float, batch_size: int
-) -> None:
+async def _dispatch_callbacks_forever(callback_service: CallbackService, *, settings: dict[str, Any]) -> None:
     while True:
+        callback = settings.get("callback", {})
+        batch_size = int(callback.get("dispatch_batch_size", 20))
         await callback_service.dispatch_pending(
             limit=batch_size,
             worker_id="server-callback-dispatcher",
             concurrency=min(batch_size, 4),
         )
-        await asyncio.sleep(poll_interval_seconds)
+        await asyncio.sleep(float(callback.get("dispatch_poll_interval_seconds", 1)))
+
+
+def _load_platform_settings(
+    store: RunStore,
+    bootstrap_settings: dict[str, Any],
+) -> tuple[dict[str, Any], list[PlatformConfig]]:
+    """Load the optional database snapshot, seeding it once when configured."""
+    if not store.platform_configs.is_initialized():
+        initialize = bool(bootstrap_settings.get("platform_config", {}).get("initialize_if_missing", True))
+        if not initialize:
+            raise SettingsValidationError(
+                "database-managed platform configuration is enabled but has not been initialized"
+            )
+        store.platform_configs.initialize(platform_configs_from_settings(bootstrap_settings))
+    configs = store.platform_configs.list()
+    required = set(PLATFORM_CONFIG_NAMESPACES) - {"auth"}
+    missing = required - {item.namespace for item in configs if item.enabled}
+    if missing:
+        names = ", ".join(sorted(missing))
+        raise SettingsValidationError(f"database-managed platform configuration is incomplete: {names}")
+    return merge_platform_configs(bootstrap_settings, configs), configs
+
+
+def _platform_config_snapshot(configs: list[PlatformConfig]) -> dict[str, dict[str, Any]]:
+    return {item.namespace: {"enabled": item.enabled, "config": item.config} for item in configs}
 
 
 async def _close_http_clients(*owners: Any) -> None:

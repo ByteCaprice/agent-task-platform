@@ -5,6 +5,10 @@ agents:
     route_tags: [example.echo]
     runtime:
       type: echo
+    skills:
+      - name: example-compliance
+        version: 1.0.0
+        activation: always
     input_schema:
       type: object
     output_schema:

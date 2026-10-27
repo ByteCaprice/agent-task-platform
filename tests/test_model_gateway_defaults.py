@@ -129,7 +129,14 @@ class _HttpClient:
         self.requests: list[dict[str, Any]] = []
         self._responses = responses or [_Response()]
 
-    async def post(self, url: str, *, headers: dict[str, str], json: dict[str, Any]) -> _Response:
+    async def post(
+        self,
+        url: str,
+        *,
+        headers: dict[str, str],
+        json: dict[str, Any],
+        timeout: float | None = None,
+    ) -> _Response:
         self.requests.append({"url": url, "headers": headers, "json": json})
         if self._responses:
             return self._responses.pop(0)

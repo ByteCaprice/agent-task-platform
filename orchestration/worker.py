@@ -40,6 +40,12 @@ class RunWorker:
         self.stats = WorkerStats()
         self._running = False
 
+    def reconfigure(self, settings: dict[str, object]) -> None:
+        """Apply worker controls to subsequent polling iterations."""
+        self.poll_interval_seconds = float(settings.get("poll_interval_seconds", 1))
+        self.batch_size = int(settings.get("batch_size", 20))
+        self.lease_seconds = float(settings.get("lease_seconds", 60))
+
     async def run_forever(self) -> None:
         self._running = True
         while self._running:

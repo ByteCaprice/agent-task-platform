@@ -22,6 +22,7 @@ from infra.outbound_policy import OutboundPolicy, OutboundPolicyError
 from infra.store import RunStore
 
 logger = logging.getLogger(__name__)
+_UNSET = object()
 
 
 class CallbackService:
@@ -39,19 +40,39 @@ class CallbackService:
         hooks=None,
     ) -> None:
         self.store = store
-        self.timeout_seconds = timeout_seconds
-        self.max_attempts = max_attempts
-        self.backoff_seconds = backoff_seconds
-        self.backoff_type = backoff_type
         self.signing_secret = signing_secret
-        self.url_allowlist = url_allowlist or []
+        self.http_client = http_client or httpx.AsyncClient(timeout=timeout_seconds)
+        self.hooks = hooks
+        self.worker_id = "callback-dispatcher"
+        self.reconfigure(
+            {
+                "timeout_seconds": timeout_seconds,
+                "max_attempts": max_attempts,
+                "backoff_seconds": backoff_seconds,
+                "backoff_type": backoff_type,
+                "url_allowlist": url_allowlist or [],
+            },
+            signing_secret=signing_secret,
+        )
+
+    def reconfigure(
+        self,
+        settings: dict[str, Any],
+        *,
+        signing_secret: str | None | object = _UNSET,
+    ) -> None:
+        """Apply callback settings to deliveries started after this call."""
+        self.timeout_seconds = float(settings.get("timeout_seconds", 10))
+        self.max_attempts = int(settings.get("max_attempts", 3))
+        self.backoff_seconds = float(settings.get("backoff_seconds", 1))
+        self.backoff_type = str(settings.get("backoff_type", "exponential"))
+        if signing_secret is not _UNSET:
+            self.signing_secret = signing_secret if isinstance(signing_secret, str) else None
+        self.url_allowlist = list(settings.get("url_allowlist", []))
         self.outbound_policy = OutboundPolicy(
             allowlist=self.url_allowlist,
             block_private_networks=not self.url_allowlist,
         )
-        self.http_client = http_client or httpx.AsyncClient(timeout=timeout_seconds)
-        self.hooks = hooks
-        self.worker_id = "callback-dispatcher"
 
     def _delay_for_attempt(self, attempt: int) -> float:
         if self.backoff_type == "exponential":
@@ -165,7 +186,12 @@ class CallbackService:
                     safe_url(delivery.url),
                     log_json(payload),
                 )
-                response = await self.http_client.post(delivery.url, content=body, headers=headers)
+                response = await self.http_client.post(
+                    delivery.url,
+                    content=body,
+                    headers=headers,
+                    timeout=self.timeout_seconds,
+                )
                 response.raise_for_status()
                 self._validate_ack(response)
                 delivery.status = CallbackStatus.DELIVERED
@@ -259,6 +285,7 @@ class CallbackService:
         deliveries = self.store.callbacks.claim_pending(
             worker_id=worker_id or self.worker_id,
             lease_seconds=lease_seconds or max(self.timeout_seconds * self.max_attempts + 5, 30),
+            max_attempts=self.max_attempts,
             limit=limit,
         )
         semaphore = asyncio.Semaphore(max(1, concurrency))

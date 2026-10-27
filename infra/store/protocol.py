@@ -17,6 +17,7 @@ from domain import (
     Conversation,
     LogEvent,
     ModelCallRecord,
+    PlatformConfig,
     SkillSpec,
     ToolSpec,
 )
@@ -102,7 +103,14 @@ class LogRepositoryProtocol(Protocol):
 
 class CallbackRepositoryProtocol(Protocol):
     def save(self, delivery: CallbackDelivery, *, conn: Any | None = None) -> CallbackDelivery: ...
-    def claim_pending(self, *, worker_id: str, lease_seconds: float, limit: int = 20) -> list[CallbackDelivery]: ...
+    def claim_pending(
+        self,
+        *,
+        worker_id: str,
+        lease_seconds: float,
+        max_attempts: int | None = None,
+        limit: int = 20,
+    ) -> list[CallbackDelivery]: ...
     def get(self, event_id: str) -> CallbackDelivery | None: ...
     def for_run(self, run_id: str) -> list[CallbackDelivery]: ...
     def counts(self) -> dict[str, int]: ...
@@ -138,6 +146,26 @@ class SkillConfigRepositoryProtocol(Protocol):
     def list(self) -> list[SkillSpec]: ...
 
 
+class PlatformConfigRepositoryProtocol(Protocol):
+    def is_initialized(self) -> bool: ...
+    def initialize(self, configs: list[PlatformConfig], *, conn: Any | None = None) -> bool: ...
+    def save(self, config: PlatformConfig, *, conn: Any | None = None) -> PlatformConfig: ...
+    def get(self, namespace: str) -> PlatformConfig | None: ...
+    def delete(self, namespace: str, *, conn: Any | None = None) -> None: ...
+    def list(self) -> list[PlatformConfig]: ...
+
+
+class NamedPlatformConfigRepositoryProtocol(Protocol):
+    def save(self, config: Any, *, conn: Any | None = None) -> Any: ...
+    def get(self, name: str, *, conn: Any | None = None) -> Any | None: ...
+    def list(self, *, conn: Any | None = None) -> list[Any]: ...
+    def delete(self, name: str, *, conn: Any | None = None) -> None: ...
+
+
+class ApiKeyConfigRepositoryProtocol(NamedPlatformConfigRepositoryProtocol, Protocol):
+    def replace(self, configs: list[Any], *, conn: Any | None = None) -> None: ...
+
+
 # ---------------------------------------------------------------------------
 # UnitOfWork container protocol
 # ---------------------------------------------------------------------------
@@ -163,6 +191,11 @@ class RunStore(Protocol):
     agents: AgentConfigRepositoryProtocol
     tools: ToolConfigRepositoryProtocol
     skills: SkillConfigRepositoryProtocol
+    runtime_configs: NamedPlatformConfigRepositoryProtocol
+    model_configs: NamedPlatformConfigRepositoryProtocol
+    callback_configs: NamedPlatformConfigRepositoryProtocol
+    api_key_configs: ApiKeyConfigRepositoryProtocol
+    platform_configs: PlatformConfigRepositoryProtocol
 
     # -- lifecycle ---------------------------------------------------------
 

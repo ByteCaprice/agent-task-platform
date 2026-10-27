@@ -24,19 +24,27 @@ from framework.observability import (
 logger = logging.getLogger("agent_task_platform.http")
 
 
-def install_request_logging_middleware(app: FastAPI, *, max_body_chars: int = 4096) -> None:
+def install_request_logging_middleware(
+    app: FastAPI,
+    *,
+    max_body_chars: int = 4096,
+    settings: dict[str, Any] | None = None,
+) -> None:
     install_request_trace_log_record_factory()
 
     @app.middleware("http")
     async def _request_logging_middleware(request: Request, call_next):
+        body_limit = (
+            int(settings.get("logging", {}).get("max_body_chars", max_body_chars)) if settings else max_body_chars
+        )
         request_trace_id = request.headers.get(REQUEST_TRACE_HEADER) or new_request_trace_id()
         token = set_request_trace_id(request_trace_id)
         request.state.request_trace_id = request_trace_id
         started = time.perf_counter()
         try:
             body = await request.body()
-            request_info = _request_info(request, body, request_trace_id, max_body_chars=max_body_chars)
-            logger.info("http request: %s", log_json(request_info, max_chars=max_body_chars))
+            request_info = _request_info(request, body, request_trace_id, max_body_chars=body_limit)
+            logger.info("http request: %s", log_json(request_info, max_chars=body_limit))
 
             async def receive() -> dict[str, Any]:
                 return {"type": "http.request", "body": body, "more_body": False}
@@ -56,7 +64,7 @@ def install_request_logging_middleware(app: FastAPI, *, max_body_chars: int = 40
                             "status": 500,
                             "elapsed_ms": elapsed_ms,
                         },
-                        max_chars=max_body_chars,
+                        max_chars=body_limit,
                     ),
                 )
                 raise
@@ -70,9 +78,9 @@ def install_request_logging_middleware(app: FastAPI, *, max_body_chars: int = 40
                 response_body,
                 elapsed_ms,
                 request_trace_id,
-                max_body_chars=max_body_chars,
+                max_body_chars=body_limit,
             )
-            logger.info("http response: %s", log_json(response_info, max_chars=max_body_chars))
+            logger.info("http response: %s", log_json(response_info, max_chars=body_limit))
 
             headers = dict(response.headers)
             headers.pop("content-length", None)

@@ -106,6 +106,49 @@ CREATE TABLE IF NOT EXISTS ai_agent_stage (
 CREATE INDEX IF NOT EXISTS idx_ai_agent_stage_run ON ai_agent_stage (run_id, stage_index);
 CREATE INDEX IF NOT EXISTS idx_ai_agent_stage_status ON ai_agent_stage (status);
 
+-- ===== ai_api_key_config =====
+CREATE TABLE IF NOT EXISTS ai_api_key_config (
+	id BIGSERIAL NOT NULL,
+	name TEXT NOT NULL,
+	api_key TEXT NOT NULL,
+	scopes JSONB NOT NULL,
+	enabled BOOLEAN NOT NULL,
+	last_time TIMESTAMP WITH TIME ZONE NOT NULL,
+	PRIMARY KEY (id),
+	CONSTRAINT uk_ai_api_key_config_name UNIQUE (name),
+	CONSTRAINT uk_ai_api_key_config_key UNIQUE (api_key),
+	CONSTRAINT ck_ai_api_key_name CHECK (length(name) > 0),
+	CONSTRAINT ck_ai_api_key_value CHECK (length(api_key) > 0),
+	CONSTRAINT ck_ai_api_key_scopes_array CHECK (jsonb_typeof(scopes) = 'array'),
+	CONSTRAINT ck_ai_api_key_scopes_nonempty CHECK (jsonb_array_length(scopes) > 0)
+);
+
+-- ===== ai_callback_config =====
+CREATE TABLE IF NOT EXISTS ai_callback_config (
+	id BIGSERIAL NOT NULL,
+	name TEXT NOT NULL,
+	timeout_seconds FLOAT NOT NULL,
+	max_attempts INTEGER NOT NULL,
+	backoff_seconds FLOAT NOT NULL,
+	backoff_type TEXT NOT NULL,
+	signing_secret TEXT,
+	url_allowlist JSONB NOT NULL,
+	channels JSONB NOT NULL,
+	dispatch_poll_interval_seconds FLOAT NOT NULL,
+	dispatch_batch_size INTEGER NOT NULL,
+	last_time TIMESTAMP WITH TIME ZONE NOT NULL,
+	PRIMARY KEY (id),
+	CONSTRAINT uk_ai_callback_config_name UNIQUE (name),
+	CONSTRAINT ck_ai_callback_timeout CHECK (timeout_seconds > 0),
+	CONSTRAINT ck_ai_callback_attempts CHECK (max_attempts > 0),
+	CONSTRAINT ck_ai_callback_backoff CHECK (backoff_seconds >= 0),
+	CONSTRAINT ck_ai_callback_backoff_type CHECK (backoff_type IN ('exponential','fixed')),
+	CONSTRAINT ck_ai_callback_allowlist_array CHECK (jsonb_typeof(url_allowlist) = 'array'),
+	CONSTRAINT ck_ai_callback_channels_object CHECK (jsonb_typeof(channels) = 'object'),
+	CONSTRAINT ck_ai_callback_dispatch_poll CHECK (dispatch_poll_interval_seconds > 0),
+	CONSTRAINT ck_ai_callback_dispatch_batch CHECK (dispatch_batch_size > 0)
+);
+
 -- ===== ai_callback_log =====
 CREATE TABLE IF NOT EXISTS ai_callback_log (
 	id TEXT NOT NULL,
@@ -174,6 +217,31 @@ CREATE INDEX IF NOT EXISTS idx_ai_model_call_run ON ai_model_call (run_id);
 CREATE INDEX IF NOT EXISTS idx_ai_model_call_status ON ai_model_call (status);
 CREATE INDEX IF NOT EXISTS idx_ai_model_call_trace ON ai_model_call (trace_id);
 
+-- ===== ai_model_config =====
+CREATE TABLE IF NOT EXISTS ai_model_config (
+	id BIGSERIAL NOT NULL,
+	name TEXT NOT NULL,
+	base_url TEXT,
+	api_key TEXT,
+	model TEXT,
+	timeout_seconds FLOAT NOT NULL,
+	temperature FLOAT NOT NULL,
+	max_retries INTEGER NOT NULL,
+	initial_backoff_seconds FLOAT NOT NULL,
+	max_backoff_seconds FLOAT NOT NULL,
+	fallback_models JSONB NOT NULL,
+	last_time TIMESTAMP WITH TIME ZONE NOT NULL,
+	PRIMARY KEY (id),
+	CONSTRAINT uk_ai_model_config_name UNIQUE (name),
+	CONSTRAINT ck_ai_model_timeout CHECK (timeout_seconds > 0),
+	CONSTRAINT ck_ai_model_temperature CHECK (temperature >= 0 AND temperature <= 2),
+	CONSTRAINT ck_ai_model_retries CHECK (max_retries >= 0),
+	CONSTRAINT ck_ai_model_initial_backoff CHECK (initial_backoff_seconds >= 0),
+	CONSTRAINT ck_ai_model_max_backoff CHECK (max_backoff_seconds >= 0),
+	CONSTRAINT ck_ai_model_backoff_range CHECK (max_backoff_seconds >= initial_backoff_seconds),
+	CONSTRAINT ck_ai_model_fallbacks_array CHECK (jsonb_typeof(fallback_models) = 'array')
+);
+
 -- ===== ai_run_log =====
 CREATE TABLE IF NOT EXISTS ai_run_log (
 	id TEXT NOT NULL,
@@ -188,6 +256,57 @@ CREATE TABLE IF NOT EXISTS ai_run_log (
 	PRIMARY KEY (id)
 );
 CREATE INDEX IF NOT EXISTS idx_ai_run_log_trace ON ai_run_log (trace_id);
+
+-- ===== ai_runtime_config =====
+CREATE TABLE IF NOT EXISTS ai_runtime_config (
+	id BIGSERIAL NOT NULL,
+	name TEXT NOT NULL,
+	worker_poll_interval_seconds FLOAT NOT NULL,
+	worker_batch_size INTEGER NOT NULL,
+	worker_lease_seconds FLOAT NOT NULL,
+	worker_shutdown_timeout_seconds FLOAT NOT NULL,
+	queue_global_max_concurrency INTEGER NOT NULL,
+	queue_route_limits JSONB NOT NULL,
+	queue_caller_limits JSONB NOT NULL,
+	queue_max_nested_depth INTEGER NOT NULL,
+	queue_max_active_children_per_root INTEGER NOT NULL,
+	rate_limit_enabled BOOLEAN NOT NULL,
+	rate_limit_default_capacity FLOAT NOT NULL,
+	rate_limit_default_fill_rate FLOAT NOT NULL,
+	rate_limit_caller_limits JSONB NOT NULL,
+	config_watcher_poll_interval_seconds FLOAT NOT NULL,
+	kanban_require_api_key BOOLEAN NOT NULL,
+	logging_level TEXT NOT NULL,
+	logging_max_file_size_mb INTEGER NOT NULL,
+	logging_retention_days INTEGER NOT NULL,
+	logging_max_body_chars INTEGER NOT NULL,
+	run_log_retention_days FLOAT,
+	callback_retention_days FLOAT,
+	model_call_retention_days FLOAT,
+	last_time TIMESTAMP WITH TIME ZONE NOT NULL,
+	PRIMARY KEY (id),
+	CONSTRAINT uk_ai_runtime_config_name UNIQUE (name),
+	CONSTRAINT ck_ai_runtime_worker_poll CHECK (worker_poll_interval_seconds > 0),
+	CONSTRAINT ck_ai_runtime_worker_batch CHECK (worker_batch_size > 0),
+	CONSTRAINT ck_ai_runtime_worker_lease CHECK (worker_lease_seconds > 0),
+	CONSTRAINT ck_ai_runtime_worker_shutdown CHECK (worker_shutdown_timeout_seconds > 0),
+	CONSTRAINT ck_ai_runtime_queue_concurrency CHECK (queue_global_max_concurrency > 0),
+	CONSTRAINT ck_ai_runtime_queue_depth CHECK (queue_max_nested_depth >= 0),
+	CONSTRAINT ck_ai_runtime_queue_children CHECK (queue_max_active_children_per_root > 0),
+	CONSTRAINT ck_ai_runtime_route_limits_object CHECK (jsonb_typeof(queue_route_limits) = 'object'),
+	CONSTRAINT ck_ai_runtime_caller_limits_object CHECK (jsonb_typeof(queue_caller_limits) = 'object'),
+	CONSTRAINT ck_ai_runtime_rate_capacity CHECK (rate_limit_default_capacity > 0),
+	CONSTRAINT ck_ai_runtime_rate_fill CHECK (rate_limit_default_fill_rate >= 0),
+	CONSTRAINT ck_ai_runtime_rate_callers_object CHECK (jsonb_typeof(rate_limit_caller_limits) = 'object'),
+	CONSTRAINT ck_ai_runtime_watcher_poll CHECK (config_watcher_poll_interval_seconds > 0),
+	CONSTRAINT ck_ai_runtime_logging_level CHECK (logging_level IN ('debug','info','warning','warn','error','critical','fatal','notset')),
+	CONSTRAINT ck_ai_runtime_log_file_size CHECK (logging_max_file_size_mb > 0),
+	CONSTRAINT ck_ai_runtime_log_retention CHECK (logging_retention_days > 0),
+	CONSTRAINT ck_ai_runtime_log_body CHECK (logging_max_body_chars > 0),
+	CONSTRAINT ck_ai_runtime_run_retention CHECK (run_log_retention_days IS NULL OR run_log_retention_days > 0),
+	CONSTRAINT ck_ai_runtime_callback_retention CHECK (callback_retention_days IS NULL OR callback_retention_days > 0),
+	CONSTRAINT ck_ai_runtime_model_retention CHECK (model_call_retention_days IS NULL OR model_call_retention_days > 0)
+);
 
 -- ===== ai_skill_config =====
 CREATE TABLE IF NOT EXISTS ai_skill_config (

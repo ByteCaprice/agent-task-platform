@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import binascii
 import hashlib
+import json
 import mimetypes
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -44,11 +45,14 @@ class PromptWorkflowAgent:
             session=getattr(context, "skills", EmptySkillSession()),
             catalog_max_chars=int((context.agent.runtime or {}).get("skill_catalog_max_chars", 8_000)),
         )
-        runtime: dict[str, Any] = {
-            "prompt_name": self.prompt_name,
-            "prompt_version": context.agent.version,
-            "prompt_fingerprint_content": self.prompt,
-        }
+        runtime = model_runtime(context)
+        runtime.update(
+            {
+                "prompt_name": self.prompt_name,
+                "prompt_version": context.agent.version,
+                "prompt_fingerprint_content": self.prompt,
+            }
+        )
         if composed.provenance:
             runtime["instructions"] = composed.instructions
             runtime["prompt_fingerprint_content"] = self.prompt + "\n" + composed.fingerprint_content
@@ -94,6 +98,32 @@ class PromptWorkflowAgent:
             "role": "user",
             "content": (f"{self.prompt}\n\nInput:\n{_text_input(input_data)}"),
         }
+
+
+def model_runtime(context: AgentContext, **overrides: Any) -> dict[str, Any]:
+    """Resolve model settings owned by a Python Agent registration."""
+    agent_runtime = context.agent.runtime or {}
+    keys = {
+        "provider",
+        "base_url",
+        "api_key",
+        "model",
+        "timeout_seconds",
+        "temperature",
+        "max_tokens",
+        "cost_per_1k_tokens",
+        "response_format",
+        "fallback_models",
+        "plugins",
+        "tools",
+        "web_search_options",
+    }
+    runtime = {key: agent_runtime[key] for key in keys if key in agent_runtime}
+    configured = agent_runtime.get("model_config")
+    if isinstance(configured, dict):
+        runtime.update(configured)
+    runtime.update(overrides)
+    return runtime
 
 
 async def resolve_input_files(context: AgentContext, input_data: dict[str, Any]) -> list[dict[str, Any]]:
@@ -294,9 +324,23 @@ def _validate_mime(context: AgentContext | None, mime_type: str) -> None:
 
 
 def extract_model_data(model_output: dict[str, Any]) -> Any:
-    if set(model_output.keys()) <= {"data", "agent", "model_call_id"}:
-        return model_output.get("data")
-    return {key: value for key, value in model_output.items() if key not in {"agent", "model_call_id"}}
+    if set(model_output.keys()) <= {"data", "agent", "model_call_id", "annotations"}:
+        data = model_output.get("data")
+    else:
+        data = {key: value for key, value in model_output.items() if key not in {"agent", "model_call_id"}}
+    if not isinstance(data, str):
+        return data
+    candidate = data.strip()
+    if candidate.startswith("```"):
+        first_line, separator, remainder = candidate.partition("\n")
+        if separator and first_line.lower() in {"```", "```json"}:
+            fenced_json, closing, _trailing = remainder.partition("\n```")
+            if closing:
+                candidate = fenced_json.strip()
+    try:
+        return json.loads(candidate)
+    except json.JSONDecodeError:
+        return data
 
 
 def _text_input(input_data: dict[str, Any]) -> Any:

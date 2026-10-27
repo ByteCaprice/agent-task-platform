@@ -48,6 +48,27 @@ class RunScheduler:
         self._active_run_holders: dict[str, dict[str, Any]] = {}
         self._lock = threading.RLock()
 
+    def reconfigure(self, settings: dict[str, Any]) -> None:
+        """Replace concurrency controls when no run currently holds a slot."""
+        limits = SchedulerLimits(
+            global_max_concurrency=int(settings.get("global_max_concurrency", 20)),
+            route_tag_max_concurrency=dict(settings.get("route_tags", {})),
+            caller_max_concurrency=dict(settings.get("callers", {})),
+            max_nested_depth=int(settings.get("max_nested_depth", 3)),
+            max_active_children_per_root=int(settings.get("max_active_children_per_root", 5)),
+        )
+        if limits.global_max_concurrency <= 0:
+            raise ValueError("queue.global_max_concurrency must be greater than zero")
+        with self._lock:
+            if self._active_run_holders:
+                raise RuntimeError("queue settings cannot reload while runs are active")
+            self.limits = limits
+            self.global_semaphore = asyncio.Semaphore(limits.global_max_concurrency)
+            self.task_tag_semaphores.clear()
+            self.caller_semaphores.clear()
+            self.nested_children_semaphores.clear()
+            self.ancestor_reentrant_semaphores.clear()
+
     def semaphore_for_agent(self, agent: AgentSpec) -> asyncio.Semaphore:
         with self._lock:
             return self.agent_semaphores.setdefault(agent.name, asyncio.Semaphore(agent.max_concurrency))

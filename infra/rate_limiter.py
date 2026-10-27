@@ -43,6 +43,12 @@ class RateLimiter:
         self._buckets: dict[str, TokenBucket] = {}
         self._lock = threading.Lock()
 
+    def reconfigure(self, settings: dict[str, Any]) -> None:
+        """Replace limits and discard buckets created with old capacities."""
+        with self._lock:
+            self.settings = dict(settings)
+            self._buckets.clear()
+
     def _get_bucket(self, caller: str) -> TokenBucket:
         with self._lock:
             if caller not in self._buckets:

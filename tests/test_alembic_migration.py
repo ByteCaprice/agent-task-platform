@@ -16,6 +16,10 @@ EXPECTED_TABLES = {
     "ai_tool_config",
     "ai_skill_config",
     "ai_model_call",
+    "ai_runtime_config",
+    "ai_model_config",
+    "ai_callback_config",
+    "ai_api_key_config",
 }
 
 _counter = itertools.count()

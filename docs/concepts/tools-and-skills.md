@@ -15,3 +15,5 @@ A Skill is a versioned package of instructions, references, assets, and optional
 Skills can be always active, selected automatically, or activated explicitly. Skill scripts are not automatically exposed to model output; they require explicit registration and remain subject to runtime timeout controls.
 
 Use a Skill for task guidance and reusable local knowledge. Use a Tool for an externally observable capability.
+
+See [Integrating Skills](../guides/integrate-skills.md) for artifact structure, registration, activation, publication, scripts, Specialist Agents, and migration guidance.

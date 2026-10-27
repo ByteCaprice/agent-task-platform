@@ -9,10 +9,14 @@ next to the table definition and repositories stay thin.
 from infra.store.model.ai_agent_config import AiAgentConfig
 from infra.store.model.ai_agent_run import AiAgentRun
 from infra.store.model.ai_agent_stage import AiAgentStage
+from infra.store.model.ai_api_key_config import AiApiKeyConfig
 from infra.store.model.ai_callback import AiCallback
+from infra.store.model.ai_callback_config import AiCallbackConfig
 from infra.store.model.ai_conversation import AiConversation
 from infra.store.model.ai_model_call import AiModelCall
+from infra.store.model.ai_model_config import AiModelConfig
 from infra.store.model.ai_run_log import AiRunLog
+from infra.store.model.ai_runtime_config import AiRuntimeConfig
 from infra.store.model.ai_skill_config import AiSkillConfig
 from infra.store.model.ai_tool_config import AiToolConfig
 from infra.store.model.base import AUTO_PK, JSON_VARIANT, Base
@@ -25,9 +29,13 @@ __all__ = [
     "AUTO_PK",
     "JSON_VARIANT",
     "AiAgentConfig",
+    "AiApiKeyConfig",
     "AiCallback",
+    "AiCallbackConfig",
     "AiConversation",
     "AiModelCall",
+    "AiModelConfig",
+    "AiRuntimeConfig",
     "AiRunLog",
     "AiAgentRun",
     "AiAgentStage",

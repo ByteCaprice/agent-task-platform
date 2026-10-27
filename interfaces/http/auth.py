@@ -77,6 +77,11 @@ class ApiKeyRegistry:
                 )
                 self._entries[key] = entry
 
+    def reconfigure(self, raw_config: Any) -> None:
+        """Atomically replace the keys used by subsequent requests."""
+        replacement = ApiKeyRegistry(raw_config)
+        self._entries = replacement._entries
+
     def authenticate(self, api_key: str | None) -> ApiKeyEntry | None:
         """Return the matching :class:`ApiKeyEntry` or *None*."""
         if not api_key:

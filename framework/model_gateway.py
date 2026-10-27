@@ -10,6 +10,7 @@ import hashlib
 import json
 import logging
 import time
+from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -41,7 +42,7 @@ RETRYABLE_EXCEPTIONS = {
 
 # OpenAI-compatible vendors expose a few non-standard request knobs. Keep this
 # explicit so agent runtime cannot accidentally pass arbitrary transport fields.
-EXTRA_PAYLOAD_KEYS = {"plugins", "web_search_options"}
+EXTRA_PAYLOAD_KEYS = {"plugins", "tools", "web_search_options"}
 
 
 @dataclass
@@ -77,6 +78,14 @@ class RetryPolicy:
         return False
 
 
+@dataclass(frozen=True)
+class _CallConfig:
+    defaults: dict[str, Any]
+    timeout_seconds: float
+    retry_policy: RetryPolicy
+    fallback_models: list[str]
+
+
 class ModelGateway:
     """Production model gateway with retry, latency tracking, and fallback.
 
@@ -96,8 +105,12 @@ class ModelGateway:
         http_client: Any | None = None,
     ) -> None:
         self.store = store
-        self.defaults = defaults or {}
         self.http_client = http_client
+        self.reconfigure(defaults or {})
+
+    def reconfigure(self, defaults: dict[str, Any]) -> None:
+        """Atomically replace the defaults used by subsequent model calls."""
+        self.defaults = deepcopy(defaults)
         self.timeout_seconds = float(self.defaults.get("timeout_seconds") or 60)
         self.retry_policy = RetryPolicy(
             max_retries=int(self.defaults.get("max_retries", 2)),
@@ -105,6 +118,14 @@ class ModelGateway:
             max_backoff_seconds=float(self.defaults.get("max_backoff_seconds", 30.0)),
         )
         self.fallback_models: list[str] = list(self.defaults.get("fallback_models", []))
+
+    def _snapshot_config(self) -> _CallConfig:
+        return _CallConfig(
+            defaults=deepcopy(self.defaults),
+            timeout_seconds=self.timeout_seconds,
+            retry_policy=deepcopy(self.retry_policy),
+            fallback_models=list(self.fallback_models),
+        )
 
     async def complete(
         self,
@@ -117,7 +138,9 @@ class ModelGateway:
         metadata: dict[str, Any],
         runtime: dict[str, Any],
     ) -> dict[str, Any]:
-        provider = runtime.get("provider") or self.defaults.get("provider") or "openai_compatible"
+        config = self._snapshot_config()
+        runtime = deepcopy(runtime)
+        provider = runtime.get("provider") or "openai_compatible"
         if provider != "openai_compatible":
             raise ValueError(f"Unsupported model provider {provider!r}")
         prompt_name = runtime.get("prompt_name")
@@ -127,8 +150,10 @@ class ModelGateway:
         prompt_hash = hashlib.sha256(
             str(prompt_fingerprint_content if prompt_fingerprint_content is not None else instructions).encode()
         ).hexdigest()
-        model = runtime.get("model") or self.defaults.get("model")
-        fallback_models = list(runtime.get("fallback_models") or self.fallback_models)
+        model = runtime.get("model") or config.defaults.get("model")
+        fallback_models = (
+            list(runtime.get("fallback_models") or []) if "fallback_models" in runtime else config.fallback_models
+        )
         models_to_try = [model] + [m for m in fallback_models if m != model]
         messages = _messages_for_request(
             input_data=input_data,
@@ -190,20 +215,24 @@ class ModelGateway:
                     runtime,
                     model=current_model,
                     messages=messages,
+                    config=config,
                 )
                 content = _content_from_response(response_body)
                 annotations = _annotations_from_response(response_body)
                 usage = _usage_from_response(response_body)
                 output = _parse_output(content)
+                # This reserved field belongs to the provider response, never
+                # to model-authored JSON (including when citations are absent).
+                output.pop("annotations", None)
                 if annotations:
-                    output.setdefault("annotations", annotations)
+                    output["annotations"] = annotations
                 record.status = "succeeded"
                 record.prompt_tokens = usage["prompt_tokens"]
                 record.completion_tokens = usage["completion_tokens"]
                 record.total_tokens = usage["total_tokens"]
                 record.estimated_cost = _estimate_cost(
                     record.total_tokens,
-                    float(runtime.get("cost_per_1k_tokens") or self.defaults.get("cost_per_1k_tokens") or 0.0),
+                    float(runtime.get("cost_per_1k_tokens") or config.defaults.get("cost_per_1k_tokens") or 0.0),
                 )
                 record.output_summary = _summarize(output)
                 record.finish_time = utc_now()
@@ -256,7 +285,7 @@ class ModelGateway:
                     )
                 )
                 # If non-retryable (4xx), don't try fallback models
-                if not self.retry_policy.should_retry(exception=exc):
+                if not config.retry_policy.should_retry(exception=exc):
                     raise
                 # If this was the last fallback model, raise
                 if model_idx >= len(models_to_try) - 1:
@@ -270,22 +299,26 @@ class ModelGateway:
         *,
         model: str,
         messages: list[dict[str, Any]],
+        config: _CallConfig | None = None,
     ) -> tuple[dict[str, Any], int, int, str | None]:
         """Execute model call with retry policy. Returns (response_body, http_status, latency_ms, provider_request_id)."""
+        config = config or self._snapshot_config()
+        policy = config.retry_policy
         last_exc: Exception | None = None
-        for attempt in range(self.retry_policy.max_retries + 1):
+        max_retries = max(0, int(runtime.get("max_retries", policy.max_retries)))
+        for attempt in range(max_retries + 1):
             try:
-                response, latency_ms = await self._do_request(runtime, model=model, messages=messages)
+                response, latency_ms = await self._do_request(runtime, model=model, messages=messages, config=config)
                 http_status = response.status_code
-                if response.status_code in self.retry_policy.retryable_status_codes:
+                if response.status_code in policy.retryable_status_codes:
                     body_text = response.text[:500] if hasattr(response, "text") else ""
-                    if attempt < self.retry_policy.max_retries:
-                        delay = self.retry_policy.delay_for(attempt)
+                    if attempt < max_retries:
+                        delay = policy.delay_for(attempt)
                         logger.warning(
                             "Model call got HTTP %d (attempt %d/%d), retrying in %.1fs: %s",
                             http_status,
                             attempt + 1,
-                            self.retry_policy.max_retries + 1,
+                            max_retries + 1,
                             delay,
                             body_text,
                         )
@@ -298,12 +331,12 @@ class ModelGateway:
                 return body, http_status, latency_ms, provider_request_id
             except Exception as exc:
                 last_exc = exc
-                if attempt < self.retry_policy.max_retries and self.retry_policy.should_retry(exception=exc):
-                    delay = self.retry_policy.delay_for(attempt)
+                if attempt < max_retries and policy.should_retry(exception=exc):
+                    delay = policy.delay_for(attempt)
                     logger.warning(
                         "Model call failed (attempt %d/%d), retrying in %.1fs: %s: %s",
                         attempt + 1,
-                        self.retry_policy.max_retries + 1,
+                        max_retries + 1,
                         delay,
                         type(exc).__name__,
                         exc,
@@ -320,36 +353,55 @@ class ModelGateway:
         *,
         model: str,
         messages: list[dict[str, Any]],
+        config: _CallConfig | None = None,
     ) -> tuple[Any, int]:
         """Execute a single HTTP request. Returns (response, latency_ms)."""
-        base_url = normalize_openai_base_url(runtime.get("base_url") or self.defaults.get("base_url") or "")
+        config = config or self._snapshot_config()
+        defaults = config.defaults
+        base_url = normalize_openai_base_url(runtime.get("base_url") or defaults.get("base_url") or "")
         if not base_url:
             raise ValueError("model base_url is required")
-        api_key = runtime.get("api_key") or self.defaults.get("api_key")
+        api_key = runtime.get("api_key") or defaults.get("api_key")
         headers = {"Content-Type": "application/json"}
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
         payload: dict[str, Any] = {
             "model": model,
             "messages": messages,
-            "temperature": runtime.get("temperature", self.defaults.get("temperature", 0)),
+            "temperature": runtime.get("temperature", defaults.get("temperature", 0)),
         }
-        if runtime.get("response_format") or self.defaults.get("response_format"):
-            payload["response_format"] = runtime.get("response_format") or self.defaults.get("response_format")
+        max_tokens = runtime.get("max_tokens", defaults.get("max_tokens"))
+        if max_tokens is not None:
+            payload["max_tokens"] = int(max_tokens)
+        if runtime.get("response_format") or defaults.get("response_format"):
+            payload["response_format"] = runtime.get("response_format") or defaults.get("response_format")
         for key in EXTRA_PAYLOAD_KEYS:
             if runtime.get(key) is not None:
-                payload[key] = runtime[key]
-            elif self.defaults.get(key) is not None:
-                payload[key] = self.defaults[key]
+                payload[key] = deepcopy(runtime[key])
+            elif defaults.get(key) is not None:
+                payload[key] = deepcopy(defaults[key])
         start = time.monotonic()
-        response = await self._post_json(f"{base_url}/chat/completions", headers=headers, payload=payload)
+        timeout_seconds = float(runtime.get("timeout_seconds") or config.timeout_seconds)
+        response = await self._post_json(
+            f"{base_url}/chat/completions",
+            headers=headers,
+            payload=payload,
+            timeout_seconds=timeout_seconds,
+        )
         latency_ms = int((time.monotonic() - start) * 1000)
         return response, latency_ms
 
-    async def _post_json(self, url: str, *, headers: dict[str, str], payload: dict[str, Any]) -> Any:
+    async def _post_json(
+        self,
+        url: str,
+        *,
+        headers: dict[str, str],
+        payload: dict[str, Any],
+        timeout_seconds: float,
+    ) -> Any:
         if self.http_client is not None:
-            return await self.http_client.post(url, headers=headers, json=payload)
-        client = httpx.AsyncClient(timeout=self.timeout_seconds)
+            return await self.http_client.post(url, headers=headers, json=payload, timeout=timeout_seconds)
+        client = httpx.AsyncClient(timeout=timeout_seconds)
         if hasattr(client, "__aenter__"):
             async with client as active_client:
                 return await active_client.post(url, headers=headers, json=payload)
