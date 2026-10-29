@@ -21,7 +21,7 @@ class ModelCallRecord(BaseModel):
     trace_id: str
     agent_name: str
     agent_version: str
-    provider: str = "openai-agents-python"
+    provider: str = "openai_compatible"
     model: str | None = None
     prompt_version: str | None = None
     prompt_hash: str | None = None

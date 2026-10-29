@@ -308,13 +308,12 @@ This is not an exactly-once guarantee. It is an explicit detection and containme
 - Cancellation
 - Registry information
 
-Supported runtime adapter categories include echo/failure test adapters, Python, isolated/subprocess Python, HTTP, OpenAI Agents SDK, and the built-in Model Gateway adapter.
+Supported runtime adapter categories include echo/failure test adapters, Python, isolated/subprocess Python, HTTP, the Pi agent loop, and the built-in Model Gateway adapter.
 
 The Python extension contract is an async object exposing:
 
 ```python
-async def run(context, input_data) -> dict:
-    ...
+async def run(context, input_data) -> dict: ...
 ```
 
 Python targets are trusted code. Registration grants code execution capability.

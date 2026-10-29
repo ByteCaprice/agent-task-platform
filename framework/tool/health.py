@@ -5,12 +5,14 @@ agent's runtime or a tool's endpoint is enabled, well-formed, and reachable
 
 from __future__ import annotations
 
+import asyncio
 import importlib
 from typing import Any
 
 import httpx
 
 from domain import AgentSpec, ToolSpec
+from framework.runtime.pi.transport import runner_command, worker_environment
 from infra.outbound_policy import OutboundPolicy
 
 
@@ -32,9 +34,31 @@ async def check_agent_health(agent: AgentSpec) -> dict[str, Any]:
         except Exception as exc:
             return {"status": "unhealthy", "runtime": runtime_type, "reason": f"{type(exc).__name__}: {exc}"}
         return {"status": "healthy", "runtime": runtime_type}
-    if runtime_type == "openai_agents":
-        if importlib.util.find_spec("agents") is None:
-            return {"status": "unhealthy", "runtime": runtime_type, "reason": "agents package not installed"}
+    if runtime_type == "pi":
+        try:
+            process = await asyncio.create_subprocess_exec(
+                *runner_command(),
+                "--check",
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+                env=worker_environment(),
+            )
+            try:
+                await asyncio.wait_for(process.wait(), timeout=5)
+            finally:
+                if process.returncode is None:
+                    process.kill()
+                    await process.wait()
+            if process.returncode:
+                raise RuntimeError("Pi dependency check failed; see docs/guides/pi-runtime.md")
+        except TimeoutError:
+            return {
+                "status": "unhealthy",
+                "runtime": runtime_type,
+                "reason": "Pi dependency check timed out after 5 seconds",
+            }
+        except Exception as exc:
+            return {"status": "unhealthy", "runtime": runtime_type, "reason": str(exc)}
         return {"status": "healthy", "runtime": runtime_type, "model": runtime.get("model")}
     if runtime_type == "model_gateway":
         return {"status": "healthy", "runtime": runtime_type, "model": runtime.get("model")}

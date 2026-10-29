@@ -9,12 +9,14 @@ Agent Task Platform provides boundaries that reduce common risks in agent execut
 - Outbound URL policy rejects unsafe schemes and private-network destinations.
 - Tool Gateway validates schemas, permissions, limits, timeouts, retries, and side-effect behavior.
 - Skill snapshots make the instructions and artifacts used by a Run auditable.
+- The Pi worker receives only declared platform Tools and Run-scoped Skills through a bounded local protocol; it does not receive coding-agent filesystem or shell Tools.
 - Logs redact common secret fields and remove URL query strings.
 - Errors returned to callers avoid stack traces and readiness responses avoid database exception details.
 
 ## Trust Assumptions
 
 - A Python Agent, Tool, or Skill script is trusted code. Registration grants execution capability.
+- The task-scoped Pi Node process and its locked npm dependencies are trusted runtime code, not a security sandbox. It receives the selected model credential and can reach the configured model endpoint.
 - HTTP and MCP endpoints are external dependencies. Restrict destinations and authenticate them independently.
 - A model may produce untrusted output. Do not map model output directly to privileged side effects without schema validation and application controls.
 - Callback endpoints must verify the signature and tolerate at-least-once delivery.
@@ -25,6 +27,7 @@ Agent Task Platform provides boundaries that reduce common risks in agent execut
 - Use a secret scanner on the working tree, staged changes, and release artifacts.
 - Review plugin code and registry changes before deployment.
 - Run with least-privilege API keys and network access.
+- Restrict Pi worker network access to required model endpoints and approved proxies, and install npm dependencies from a controlled registry or build environment.
 - Keep dependencies current and monitor security advisories.
 
 Report security vulnerabilities privately once the project publishes a security policy. Do not include sensitive reproduction data in public issues.

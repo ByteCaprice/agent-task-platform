@@ -1,11 +1,11 @@
 """Agent runtime package: exports ``AgentRuntime`` plus the built-in agent
-adapters (echo, http, model_gateway, openai_agents, python, subprocess).
+adapters (echo, http, model_gateway, pi, python, subprocess).
 """
 
 from framework.runtime.adapters.echo import EchoAgent, FailingAgent
 from framework.runtime.adapters.http import HTTPAgent
 from framework.runtime.adapters.model_gateway_adapter import ModelGatewayAgent
-from framework.runtime.adapters.openai_agents import OpenAIAgentsSDKAgent
+from framework.runtime.adapters.pi_agent import PiAgent
 from framework.runtime.adapters.python import PythonAgentLoader
 from framework.runtime.adapters.subprocess_python import SubprocessPythonAgent
 from framework.runtime.agent_runtime import AgentRuntime
@@ -29,7 +29,7 @@ __all__ = [
     "FailingAgent",
     "HTTPAgent",
     "ModelGatewayAgent",
-    "OpenAIAgentsSDKAgent",
+    "PiAgent",
     "PythonAgentLoader",
     "SubprocessPythonAgent",
 ]

@@ -9,3 +9,5 @@ Use stages for work where replaying a completed step would be expensive or unsaf
 For an external side effect, use the platform's side-effect operation protections and an idempotency key. If the platform cannot determine whether a side effect completed, it treats the outcome as unknown rather than replaying it automatically.
 
 Child Agent work can also be represented as a durable stage. The parent pins the resolved child Agent version so later registry changes do not change an in-flight workflow.
+
+The Pi adapter wraps its complete model/tool loop in one `pi-agent` stage. Recovery reuses a successful final result, but an interrupted attempt restarts the loop rather than resuming from an individual model turn. See [Pi Agent Runtime](../guides/pi-runtime.md).

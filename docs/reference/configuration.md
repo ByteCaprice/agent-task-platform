@@ -60,6 +60,8 @@ MODEL__MODEL=provider-model-name
 
 Callbacks are optional. Model settings are only required for Agents that invoke a model runtime.
 
+The Pi runtime snapshots these model defaults at the start of each attempt, then applies top-level Agent runtime fields and `runtime.model_config` overrides. Database-managed model changes therefore apply to later Pi attempts without mutating an in-flight attempt. Pi-specific limits and unsupported fallback/provider-native features are documented in [Pi Agent Runtime](../guides/pi-runtime.md).
+
 ## Registries
 
 Agent, Tool, and Skill definitions are persisted in PostgreSQL. `config/agents.yaml`, `config/tools.yaml`, and `config/skills.yaml` are optional public seed inputs. Existing database entries remain authoritative.

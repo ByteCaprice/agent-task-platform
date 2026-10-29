@@ -16,7 +16,7 @@ from framework.runtime.adapters import (
     FailingAgent,
     HTTPAgent,
     ModelGatewayAgent,
-    OpenAIAgentsSDKAgent,
+    PiAgent,
     PythonAgentLoader,
     SubprocessPythonAgent,
 )
@@ -187,7 +187,12 @@ class AgentRuntime:
                 message=f"Agent {agent.name}@{agent.version} succeeded",
                 data={
                     "output_type": type(output).__name__,
-                    "output_keys": sorted(output) if isinstance(output, dict) else None,
+                    # Model-generated mapping keys may themselves contain business data.
+                    **(
+                        {"output_field_count": len(output)}
+                        if isinstance(implementation, PiAgent)
+                        else {"output_keys": sorted(output) if isinstance(output, dict) else None}
+                    ),
                 },
             )
         )
@@ -267,8 +272,12 @@ class AgentRuntime:
             return EchoAgent()
         if runtime_type == "fail":
             return FailingAgent()
+        if runtime_type == "pi":
+            return PiAgent(runtime)
         if runtime_type == "openai_agents":
-            return OpenAIAgentsSDKAgent(runtime)
+            raise ValueError(
+                "openai_agents was replaced by pi; migrate the Agent registration using docs/guides/pi-runtime.md"
+            )
         if runtime_type == "model_gateway":
             return ModelGatewayAgent(runtime)
         if runtime_type == "http":

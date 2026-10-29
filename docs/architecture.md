@@ -19,6 +19,8 @@ interfaces -> orchestration -> framework -> infra -> domain
 5. The runtime invokes governed tools and optional model providers.
 6. The result is persisted and, when configured, delivered through a signed callback.
 
+For `runtime.type: pi`, Python owns the Run and starts one task-scoped local Node process containing Pi agent core. The child performs the model/tool loop, but every capability request crosses a bounded JSONL bridge back to Python. Platform Tools still pass through Tool Gateway, Skills remain Run-scoped snapshots, and the complete loop is wrapped in one durable `pi-agent` stage. See [Pi Agent Runtime](guides/pi-runtime.md).
+
 ## Extension Boundary
 
 The platform owns reliability, persistence, governance, observability, and security boundaries. Plugins own domain intent, prompts, external integrations, and organization-specific workflows.

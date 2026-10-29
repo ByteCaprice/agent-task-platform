@@ -21,6 +21,7 @@ Chat 或 Session 上下文仍然可以服务于某个 Agent，但它是可选的
 - Durable Stage、checkpoint 与 Child Run
 - 受治理的 Python、HTTP、MCP Tool：Schema、权限、限流、超时、重试和副作用保护
 - 带不可变 Run Snapshot 的版本化 Skill
+- 通过平台 Tool 与 Skill 治理的 Pi Agent Loop
 - 支持 OpenAI-compatible 服务的模型网关、Fallback、用量与审计记录
 - Callback 签名、出站 URL 策略、结构化日志和 scoped API key
 - 可选的规范化数据库配置与运行时热加载
@@ -28,7 +29,7 @@ Chat 或 Session 上下文仍然可以服务于某个 Agent，但它是可选的
 
 ## 快速开始
 
-依赖：Python 3.11+、PostgreSQL 和 [uv](https://docs.astral.sh/uv/)。Docker 仅用于运行集成测试。
+依赖：Python 3.11+、PostgreSQL 和 [uv](https://docs.astral.sh/uv/)。Docker 仅用于运行集成测试。使用 Pi Runtime 的 Agent 还需要 Node.js 22.19+，并按 [Pi Runtime 指南](docs/guides/pi-runtime.md)安装锁定的 npm 依赖。
 
 ```bash
 uv sync --extra dev
@@ -82,6 +83,7 @@ curl -X POST http://127.0.0.1:8765/v1/runs \
 - [HTTP API](docs/reference/http-api.md)
 - [扩展 Agent 或 Tool](docs/guides/build-an-extension.md)
 - [集成 Skills（英文）](docs/guides/integrate-skills.md)
+- [Pi Agent Runtime（英文）](docs/guides/pi-runtime.md)
 - [部署](docs/guides/deployment.md)
 - [安全模型](docs/security/threat-model.md)
 

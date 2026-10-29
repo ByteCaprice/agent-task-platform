@@ -33,10 +33,6 @@ dev = [
 mcp = [
   "mcp>=1.19",
 ]
-openai = [
-  "openai>=2.36",
-  "openai-agents>=0.17",
-]
 
 [project.scripts]
 agent-task-platform = "interfaces.cli.main:main"
@@ -48,10 +44,12 @@ fallback_version = "0.1.0.dev0"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["domain*", "interfaces*", "orchestration*", "framework*", "agent_hub*", "plugins*", "infra*"]
-exclude = ["tests*", "config*", "docs*", "var*"]
+exclude = ["tests*", "config*", "docs*", "var*", "*.node_modules*"]
 
 [tool.setuptools.package-data]
 "interfaces.http" = ["dashboard/*.html", "dashboard/*.css", "dashboard/*.js"]
+"framework.runtime.pi" = ["node/*.mjs", "node/package.json", "node/package-lock.json"]
+"agent_hub.pi_multistep_demo" = ["*.md"]
 "plugins.skills" = ["**/*.md", "**/*.yaml", "**/*.json", "**/*.py"]
 
 [tool.pytest.ini_options]

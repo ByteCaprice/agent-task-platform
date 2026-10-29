@@ -18,7 +18,7 @@ The repository already provides:
 - `auto`, `explicit`, and `always` activation modes.
 - Progressive disclosure of catalog metadata, instructions, and resources.
 - Prompt composition and prompt fingerprinting.
-- OpenAI Agents SDK bridges for loading Skills and reading resources.
+- Pi runtime bridges for loading Skills and reading resources.
 - Optional subprocess execution for Skill scripts.
 - Database-first publication and registry hot reload.
 - Skill-aware durable-stage definition versions.
@@ -38,7 +38,7 @@ The main integration points are:
 | Prompt composition | `framework/skill/catalog.py` |
 | Optional script runner | `framework/skill/scripts.py` |
 | Agent runtime integration | `framework/runtime/agent_runtime.py` |
-| Model bridge tools | `framework/runtime/adapters/openai_agents.py` |
+| Model bridge tools | `framework/runtime/pi/tools.py` |
 | Run submission snapshots | `orchestration/run_service.py` |
 | Database hot reload | `orchestration/config_watcher.py` |
 | Startup composition | `interfaces/http/server.py` |
@@ -171,7 +171,7 @@ The loader rejects:
 - Symlinks anywhere in a local Skill package.
 - Individual resources larger than the configured loader limit, currently 1 MiB by default.
 
-Skill resources are supporting data, not trusted platform policy. The OpenAI Agents bridge labels returned resource text as untrusted.
+Skill resources are supporting data, not trusted platform policy. The Pi bridge labels returned resource text as untrusted.
 
 ## 5. Validate the Artifact Locally
 
@@ -232,9 +232,7 @@ Then make the existing composition-root fallback handle an unset value in `inter
 
 ```python
 configured_skill_root = settings.get("skills", {}).get("artifact_root")
-skill_root = Path(
-    configured_skill_root or root.parent / "plugins" / "skills"
-).resolve()
+skill_root = Path(configured_skill_root or root.parent / "plugins" / "skills").resolve()
 ```
 
 After that extension, configure another root through `config/settings.yaml`:
@@ -287,7 +285,7 @@ agents:
     route_tags: [example.review]
     timeout_seconds: 60
     runtime:
-      type: openai_agents
+      type: pi
       instructions: Review the supplied input. Follow the active Skill and return JSON.
       max_turns: 6
       allow_skill_scripts: false
@@ -302,7 +300,7 @@ agents:
       type: object
 ```
 
-`always` Skills are activated when the Run's `SkillSession` is created. Their instructions are available to adapters that compose active Skill instructions, including the OpenAI Agents and model-gateway adapters.
+`always` Skills are activated when the Run's `SkillSession` is created. Their instructions are available to adapters that compose active Skill instructions, including the Pi and model-gateway adapters.
 
 ### `auto`: model-selected activation
 
@@ -315,7 +313,7 @@ skills:
     activation: auto
 ```
 
-The complete model-driven flow is currently implemented by the `openai_agents` runtime adapter. It receives catalog metadata and can call `skill_load` and `skill_read_resource`.
+The complete model-driven flow is implemented by the `pi` runtime adapter. It receives catalog metadata and can call `skill_load` and `skill_read_resource`.
 
 Do not use `auto` with an adapter that has no Skill bridge and expect model-driven activation. The generic model-gateway and prompt-workflow paths compose already-active instructions, but do not currently provide the full activation tool loop.
 
@@ -375,17 +373,18 @@ runtime:
 
 In a real model-backed Python Agent, compose or pass `activation.instructions` into the model request. Activation alone does not force custom Agent code to use the returned instructions.
 
-## 8. OpenAI Agents SDK Integration
+## 8. Pi Runtime Integration
 
-Install the optional runtime dependencies:
+Install the locked runtime dependencies:
 
 ```bash
-uv sync --extra openai --extra dev
+npm ci --ignore-scripts --prefix framework/runtime/pi/node
+node framework/runtime/pi/node/runner.mjs --check
 ```
 
 Configure the model provider through the existing model settings, or set supported runtime overrides on the Agent. Do not commit API keys.
 
-For every `openai_agents` Run with assigned Skills, the adapter:
+For every `pi` Run with assigned Skills, the adapter:
 
 1. Builds a metadata-only catalog from assigned Skills.
 2. Adds the catalog to dynamic instructions.
@@ -401,20 +400,21 @@ The model-facing bridge has these boundaries:
 - `explicit` Skills cannot be loaded by a model call.
 - Resources can be read only after activation.
 - Resources are limited to `references/` and `assets/`.
-- Script execution is disabled unless `allow_skill_scripts` or the compatibility key `enable_skill_scripts` is true.
+- Script execution is disabled unless `allow_skill_scripts` is true.
 - The catalog budget defaults to 8,000 characters and can be set with `skill_catalog_max_chars`.
 
 Recommended runtime configuration:
 
 ```yaml
 runtime:
-  type: openai_agents
+  type: pi
   instructions: Select a Skill only when its catalog description matches the task.
   max_turns: 8
   skill_catalog_max_chars: 8000
-  strict_tool_schemas: true
   allow_skill_scripts: false
 ```
+
+See [Pi Agent Runtime](pi-runtime.md) for Node deployment, model settings, limits, and migration details.
 
 ## 9. Add an Optional Skill Script
 
@@ -489,7 +489,7 @@ For model-driven script calls, explicitly opt in:
 
 ```yaml
 runtime:
-  type: openai_agents
+  type: pi
   allow_skill_scripts: true
 ```
 
@@ -725,7 +725,8 @@ framework/skill/catalog.py
 framework/skill/scripts.py
 framework/runtime/agent_runtime.py
 framework/runtime/context.py
-framework/runtime/adapters/openai_agents.py
+framework/runtime/adapters/pi_agent.py
+framework/runtime/pi/tools.py
 infra/store/model/ai_skill_config.py
 orchestration/run_service.py
 orchestration/config_watcher.py
@@ -826,7 +827,7 @@ Register the Skill and add an `AgentSkillRef` under the selected Agent's `skills
 
 ### `auto` Skill never loads
 
-Confirm the Agent uses `runtime.type: openai_agents`. Other current adapters do not expose the complete model-facing activation bridge.
+Confirm the Agent uses `runtime.type: pi`. Other current adapters do not expose the complete model-facing activation bridge.
 
 ### Resource cannot be read
 

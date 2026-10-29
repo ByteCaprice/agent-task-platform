@@ -18,6 +18,8 @@ def create_agent():
 
 Register the fully qualified target in the Agent runtime configuration. Define input and output JSON Schemas so the platform can reject invalid data before execution.
 
+For a model-directed Tool loop, use `runtime.type: pi`. Pi runs in a local Node child while Tool calls still pass through Tool Gateway. See [Pi Agent Runtime](pi-runtime.md) for installation, configuration, and recovery boundaries.
+
 ## Tool
 
 Use `@function_tool` for a local Python Tool:

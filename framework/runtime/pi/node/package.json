@@ -1,0 +1,11 @@
+{
+  "name": "agent-task-platform-pi-worker",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22.19.0" },
+  "dependencies": {
+    "@earendil-works/pi-agent-core": "1.4.0",
+    "@earendil-works/pi-ai": "1.4.0"
+  }
+}

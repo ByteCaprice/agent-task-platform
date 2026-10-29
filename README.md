@@ -1,34 +1,67 @@
 # Agent Task Platform
 
-[中文文档](README.zh-CN.md)
+<p align="center">
+  <strong>Durable execution for agents that need to finish the job.</strong>
+</p>
 
-Agent Task Platform is a durable, task/run-oriented platform for building and operating production AI agents.
+<p align="center">
+  <a href="README.zh-CN.md">中文文档</a> ·
+  <a href="docs/getting-started.md">Getting Started</a> ·
+  <a href="docs/guides/pi-runtime.md">Pi Runtime</a> ·
+  <a href="docs/security/threat-model.md">Security Model</a>
+</p>
 
-Submit a task, receive a Run identifier immediately, and retrieve the result later. The platform persists execution state, retries, stages, tool calls, model calls, logs, and callback delivery so work can recover after a process restart.
+<p align="center">
+  <img alt="Python 3.11+" src="https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white">
+  <img alt="PostgreSQL" src="https://img.shields.io/badge/PostgreSQL-Durable_State-4169E1?logo=postgresql&logoColor=white">
+  <img alt="Pi Agent Core" src="https://img.shields.io/badge/Agent_Loop-Pi-6C5CE7">
+  <img alt="License" src="https://img.shields.io/badge/License-Apache--2.0-green">
+</p>
+
+Agent Task Platform is an open-source execution layer for asynchronous, observable AI agents. Submit work, receive a Run ID immediately, and let the platform own the unglamorous—but essential—parts: queues, retries, cancellation, checkpoints, tool governance, model-call records, callbacks, and recovery after a process restart.
+
+```text
+submit task  ->  durable Run  ->  agent + governed tools  ->  persisted result
+                     |                    |
+                     +-- retry/recover    +-- logs, usage, limits, audit
+```
 
 ## Why Task and Run?
 
 Many open-source agent frameworks begin with a chat or session as their primary unit of work. Agent Task Platform starts with a durable Task and Run instead: a caller submits work, the platform creates a persisted execution record, and workers can queue, retry, recover, cancel, observe, and deliver its result independently of an HTTP connection.
 
-Chat or session context can still be useful for an Agent, but it is optional context organization rather than the scheduling and reliability root. This focus makes the platform a good fit for asynchronous workflows, long-running operations, and integrations that need an auditable outcome.
+Chat or session context can still be useful, but it is optional context—not the reliability root. This makes the platform a natural fit for long-running operations, background research, multi-step automation, and integrations that need an auditable outcome.
 
-It is intended for asynchronous, observable agent work rather than a chat-session abstraction.
+| What you need | What the platform provides |
+|---|---|
+| Work that outlives an HTTP request | Persisted Runs, queue leases, and result retrieval |
+| Safe multi-step execution | Durable stages, checkpoints, and child Runs |
+| Controlled agent capabilities | Tool schemas, permissions, limits, retries, and side-effect protection |
+| A model-directed tool loop | Pi agent core in a task-scoped local Node process |
+| Operational confidence | Structured logs, model usage, callbacks, health checks, and recovery |
 
 ## Highlights
 
-- Idempotent Run submission and deterministic `route_tag` routing
-- PostgreSQL-backed queue leases, retries, cancellation, and recovery
-- Durable stages, checkpoints, and child Runs
-- Governed Python, HTTP, and MCP tools with schemas, permissions, limits, retries, and side-effect protection
-- Versioned Skills with immutable snapshots attached to each Run
-- OpenAI-compatible model gateway with fallback, usage, and audit records
-- Signed callbacks, outbound URL controls, structured logs, and scoped API keys
-- Optional normalized database configuration with live runtime reload
-- Daily and size-based rotating file logs with retention
+- **Durable orchestration** — idempotent submission, deterministic `route_tag` routing, PostgreSQL queue leases, retries, cancellation, and recovery.
+- **Composable execution** — durable stages, checkpoints, child Runs, Python/HTTP Agents, and the Pi model/tool loop.
+- **Governed capabilities** — Python, HTTP, and MCP Tools with schemas, permissions, concurrency, QPS limits, retries, and side-effect protection.
+- **Versioned intelligence** — immutable Skill snapshots, progressive disclosure, and governed Skill resources and scripts.
+- **Model flexibility** — OpenAI-compatible endpoints, usage and cost records, plus a standalone Model Gateway with fallback support.
+- **Operations built in** — signed callbacks, scoped API keys, outbound URL controls, health checks, structured logs, and retention.
+- **Live configuration** — optional normalized database configuration with hot reload for model, callback, worker, queue, auth, rate-limit, and logging settings.
+
+## Choose Your Agent Style
+
+Use the smallest runtime that fits the job:
+
+- **Pi** for a model-directed, multi-turn Tool and Skill loop.
+- **Python** for deterministic workflows and custom orchestration.
+- **HTTP** for independently deployed Agents.
+- **Model Gateway** for a direct, audited model completion without an autonomous loop.
 
 ## Quick Start
 
-Requirements: Python 3.11+, PostgreSQL, and [uv](https://docs.astral.sh/uv/). Docker is only needed for the integration test suite.
+Requirements: Python 3.11+, PostgreSQL, and [uv](https://docs.astral.sh/uv/). Docker is only needed for the integration test suite. Pi-backed Agents additionally require Node.js 22.19+ and the locked npm dependencies described in the [Pi Runtime guide](docs/guides/pi-runtime.md).
 
 ```bash
 uv sync --extra dev
@@ -82,6 +115,7 @@ The response is `202 Accepted` and includes `run_id`, `trace_id`, and `conversat
 - [HTTP API](docs/reference/http-api.md)
 - [Build an Agent or Tool](docs/guides/build-an-extension.md)
 - [Integrate Skills](docs/guides/integrate-skills.md)
+- [Pi Agent Runtime](docs/guides/pi-runtime.md)
 - [Deployment](docs/guides/deployment.md)
 - [Security Model](docs/security/threat-model.md)
 
