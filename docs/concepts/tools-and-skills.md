@@ -2,11 +2,19 @@
 
 Tools and Skills solve different problems.
 
+| Need | Use |
+|---|---|
+| Own routing, execution, limits, and output | Agent |
+| Perform an action or retrieve dynamic data | Tool |
+| Supply reusable instructions or local reference material | Skill |
+
 ## Tools
 
 A Tool performs a capability call. Supported endpoints include Python targets, HTTP endpoints, MCP servers, and built-ins. Tool Gateway enforces Agent permissions, JSON Schema validation, timeouts, retries, concurrency, QPS limits, circuit breaking, and audit logs.
 
 Use a Tool for an action or data lookup. Treat Python targets as trusted code: registering a Python target allows code execution in the server process or configured isolation runtime.
+
+An Agent must declare the Tool in `tools`, hold `tool:<name>` permission, and be accepted by the Tool's `allowed_agents` policy. Registration alone does not grant invocation.
 
 ## Skills
 
@@ -15,5 +23,7 @@ A Skill is a versioned package of instructions, references, assets, and optional
 Skills can be always active, selected automatically, or activated explicitly. Skill scripts are not automatically exposed to model output; they require explicit registration and remain subject to runtime timeout controls.
 
 Use a Skill for task guidance and reusable local knowledge. Use a Tool for an externally observable capability.
+
+Skills do not grant Tool permissions. `allowed-tools` in Skill frontmatter is descriptive metadata; Agent and Tool registry policy remains authoritative.
 
 See [Integrating Skills](../guides/integrate-skills.md) for artifact structure, registration, activation, publication, scripts, Specialist Agents, and migration guidance.

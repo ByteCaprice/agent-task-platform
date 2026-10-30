@@ -24,3 +24,5 @@ alembic downgrade base
 Run `alembic revision --autogenerate -m "describe change"` after changing an ORM model, then review the generated migration before applying it.
 
 `sql/ddl.sql` is a generated empty-database reference. Alembic is the schema migration mechanism.
+
+For the complete contributor workflow, including migration review, Testcontainers validation, and generated seed SQL, see [Development](../docs/development.md#schema-and-migration-workflow).

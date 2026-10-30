@@ -1,5 +1,7 @@
 # Agent Task Platform
 
+> 完整的贡献者文档导航请参阅 [docs/README.md](docs/README.md)；本地开发流程请参阅 [docs/development.md](docs/development.md)。
+
 [English](README.md)
 
 Agent Task Platform 是一个面向生产环境的、以 Task/Run 为核心的持久化 AI Agent 平台。

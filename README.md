@@ -6,6 +6,7 @@
 
 <p align="center">
   <a href="README.zh-CN.md">中文文档</a> ·
+  <a href="docs/README.md">Documentation</a> ·
   <a href="docs/getting-started.md">Getting Started</a> ·
   <a href="docs/guides/pi-runtime.md">Pi Runtime</a> ·
   <a href="docs/security/threat-model.md">Security Model</a>
@@ -105,18 +106,23 @@ The response is `202 Accepted` and includes `run_id`, `trace_id`, and `conversat
 
 ## Documentation
 
+- [Documentation Hub and Reading Paths](docs/README.md)
 - [Getting Started](docs/getting-started.md)
+- [Contributing](CONTRIBUTING.md)
+- [Development Workflow](docs/development.md)
 - [Architecture](docs/architecture.md)
 - [Technical Report](TECHNICAL_REPORT.md)
 - [Task and Run Concepts](docs/concepts/task-and-run.md)
 - [Durable Stages](docs/concepts/durable-stages.md)
 - [Tools and Skills](docs/concepts/tools-and-skills.md)
+- [Glossary](docs/reference/glossary.md)
 - [Configuration](docs/reference/configuration.md)
 - [HTTP API](docs/reference/http-api.md)
 - [Build an Agent or Tool](docs/guides/build-an-extension.md)
 - [Integrate Skills](docs/guides/integrate-skills.md)
 - [Pi Agent Runtime](docs/guides/pi-runtime.md)
 - [Deployment](docs/guides/deployment.md)
+- [Troubleshooting](docs/troubleshooting.md)
 - [Security Model](docs/security/threat-model.md)
 
 ## Project Layout
@@ -130,9 +136,14 @@ interfaces/      FastAPI server, CLI, settings, and operational dashboard
 agent_hub/       Offline example agents
 plugins/         Offline example tools and Skills
 config/          Public example registry and environment configuration
+migrations/      Alembic history for PostgreSQL upgrades
+sql/             Generated empty-database and seed SQL references
+tests/           Unit, integration, failure-boundary, and migration tests
 ```
 
 ## Development
+
+See the [Development guide](docs/development.md) for local profiles, Docker-free checks, the full PostgreSQL suite, Pi checks, migrations, generated SQL, and the pull-request workflow.
 
 ```bash
 uv run ruff check .

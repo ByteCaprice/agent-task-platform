@@ -1,5 +1,22 @@
 # Configuration Reference
 
+The default configuration directory is `config/`. Select another directory with the CLI's `--config-dir` option or `AGENT_TASK_PLATFORM_CONFIG_DIR` for commands such as Alembic that do not receive the CLI option.
+
+The directory can contain:
+
+| File | Purpose |
+|---|---|
+| `settings.yaml` | Non-secret base settings |
+| `.env` | Base environment-style overrides |
+| `.env.{ENV_MODE}` | Profile-specific overrides, such as `.env.dev` |
+| `agents.yaml` | Agent seed versions |
+| `tools.yaml` | Tool seed versions |
+| `skills.yaml` | Local Skill artifact seeds |
+
+Do not commit real secrets in any of these files.
+
+## Precedence
+
 Settings use nested environment variables such as `DATABASE__HOST`. Values are loaded in this order, from lowest to highest precedence:
 
 1. Built-in defaults
@@ -9,6 +26,16 @@ Settings use nested environment variables such as `DATABASE__HOST`. Values are l
 5. Process environment variables
 
 Use `AGENT_TASK_PLATFORM_CONFIG_DIR` to select a different configuration directory.
+
+Process environment is the highest-precedence source. Nested fields use double underscores: `QUEUE__GLOBAL_MAX_CONCURRENCY=10` maps to `queue.global_max_concurrency`.
+
+Validate a complete profile before starting a process:
+
+```bash
+ENV_MODE=dev uv run agent-task-platform check-config --config-dir config
+```
+
+This command connects to the configured store and composes registries. It does not run Alembic migrations.
 
 ## Required PostgreSQL Settings
 
@@ -22,6 +49,8 @@ DATABASE__PASSWORD=replace-me
 ```
 
 PostgreSQL is the supported durable storage backend. Application startup does not apply migrations.
+
+Connection details are bootstrap-only and cannot be moved into database-managed runtime settings because they are required before those settings can be read.
 
 ## Authentication
 
@@ -48,6 +77,18 @@ WORKER__LEASE_SECONDS=60
 
 The API server starts Run execution in-process by default. Use `agent-task-platform worker` when a separate worker process is required.
 
+Common scheduling controls are:
+
+```dotenv
+QUEUE__GLOBAL_MAX_CONCURRENCY=20
+QUEUE__ROUTE_TAGS={"example.calculator":4}
+QUEUE__CALLERS={"batch-client":2}
+QUEUE__MAX_NESTED_DEPTH=3
+QUEUE__MAX_ACTIVE_CHILDREN_PER_ROOT=5
+```
+
+These are admission limits, not database connection-pool sizing. Agent-level `max_concurrency` and Tool-level concurrency/QPS policies apply in addition.
+
 ## Callbacks and Models
 
 ```dotenv
@@ -60,11 +101,33 @@ MODEL__MODEL=provider-model-name
 
 Callbacks are optional. Model settings are only required for Agents that invoke a model runtime.
 
+Callback URLs must pass outbound policy and `CALLBACK__URL_ALLOWLIST`. Configure a signing secret when receivers need to authenticate payloads. A successful Agent result and successful callback delivery are separate persisted states.
+
 The Pi runtime snapshots these model defaults at the start of each attempt, then applies top-level Agent runtime fields and `runtime.model_config` overrides. Database-managed model changes therefore apply to later Pi attempts without mutating an in-flight attempt. Pi-specific limits and unsupported fallback/provider-native features are documented in [Pi Agent Runtime](../guides/pi-runtime.md).
 
 ## Registries
 
 Agent, Tool, and Skill definitions are persisted in PostgreSQL. `config/agents.yaml`, `config/tools.yaml`, and `config/skills.yaml` are optional public seed inputs. Existing database entries remain authoritative.
+
+At startup, YAML inserts only missing `(name, version)` pairs. It never overwrites an existing database record. Publish a new version for a changed contract or use admin APIs for database-managed updates. Skill content is persisted as an immutable verified artifact.
+
+## Settings Overview
+
+| Section | Examples | Ownership |
+|---|---|---|
+| `server` | bind host, port, reload | Bootstrap only |
+| `database` | PostgreSQL host, database, credentials | Bootstrap only |
+| `auth` | inbound keys and scopes | Bootstrap or database-managed |
+| `queue` | global, route, caller, and child limits | Bootstrap or database-managed |
+| `worker` | poll interval, batch, lease, shutdown | Mixed; worker identity remains bootstrap-only |
+| `callback` | retries, signing, allowlist, dispatch | Bootstrap or database-managed |
+| `model` | endpoint, credential, model, retries, fallback | Bootstrap or database-managed |
+| `rate_limit` | token-bucket defaults and caller overrides | Bootstrap or database-managed |
+| `logging` | level, body bound, file rotation | Mixed; file location remains bootstrap-only |
+| `retention` | log, callback, and model-call age | Bootstrap or database-managed |
+| `platform_config` | database ownership and initialization | Bootstrap only |
+
+The typed defaults and validation rules are defined in `interfaces/settings.py`. Unknown top-level sections are ignored, so adding a new section requires a settings-model change rather than YAML alone.
 
 ## Database-managed Runtime Configuration
 
@@ -90,6 +153,8 @@ Database connection details, server binding, coordination settings, Worker ident
 
 Credentials stored in these tables are plaintext application secrets. Restrict table access, database logs, backups, and administrative access accordingly.
 
+Database-managed configuration is snapshot-based. New work sees a successfully reloaded snapshot; in-flight attempts keep the values they already captured. Invalid updates are rejected rather than partially applied. Queue limits reload only when scheduler slots are not held.
+
 ## File Logging
 
 The CLI always logs to stdout. Daily, size-limited files are optional:
@@ -103,3 +168,10 @@ LOGGING__LEVEL=info
 ```
 
 Relative directories are resolved from the project directory containing `config/`. Files use names such as `api.2026-10-27.log` and `api.2026-10-27.1.log`; expired calendar days are removed when a handler starts or the date changes.
+
+## Related Guides
+
+- [Getting Started](../getting-started.md)
+- [Deployment](../guides/deployment.md)
+- [Pi Agent Runtime](../guides/pi-runtime.md)
+- [Troubleshooting](../troubleshooting.md)
