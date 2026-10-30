@@ -31,7 +31,7 @@ def test_safe_url_keeps_path_and_removes_query() -> None:
     assert safe_url("https://example.test/a/b?token=abc#frag") == "https://example.test/a/b"
 
 
-def test_http_logging_middleware_logs_redacted_request_and_response(caplog) -> None:
+def test_http_logging_middleware_logs_metadata_without_payload_secrets(caplog) -> None:
     app = FastAPI()
     install_request_logging_middleware(app)
 
@@ -60,7 +60,8 @@ def test_http_logging_middleware_logs_redacted_request_and_response(caplog) -> N
     logged = "\n".join(record.getMessage() for record in caplog.records)
     assert "http request" in logged
     assert "http response" in logged
-    assert "case-1" in logged
+    assert '"query_keys":[]' in logged
+    assert "case-1" not in logged
     assert "request-password" not in logged
     assert "secret-api-key" not in logged
     assert "response-token" not in logged

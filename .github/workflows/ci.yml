@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    name: Quality / Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.19"
+          cache: npm
+          cache-dependency-path: framework/runtime/pi/node/package-lock.json
+      - run: uv sync --locked --extra dev
+      - run: npm ci --ignore-scripts --prefix framework/runtime/pi/node
+      - run: node framework/runtime/pi/node/runner.mjs --check
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run pytest -q
+      - name: Verify generated SQL is current
+        run: |
+          uv run python scripts/gen_sql.py
+          git diff --exit-code -- sql/ddl.sql sql/seed.dml.sql
+      - name: Check Markdown relative links
+        run: uv run python scripts/check_doc_links.py
+      - name: Build wheel and source distribution
+        run: uv build --no-sources
+      - name: Smoke-test installed wheel outside the source tree
+        run: |
+          wheel_venv="$RUNNER_TEMP/atp-wheel-venv"
+          smoke_dir="$RUNNER_TEMP/atp-wheel-smoke"
+          uv venv "$wheel_venv"
+          uv pip install --python "$wheel_venv/bin/python" dist/*.whl
+          mkdir -p "$smoke_dir"
+          cd "$smoke_dir"
+          "$wheel_venv/bin/agent-task-platform" init-config \
+            --config-dir "$smoke_dir/config"
+          test -f "$smoke_dir/config/agents.yaml"
+          test -f "$smoke_dir/config/.env.profile.example"
+
+  secret-scan:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

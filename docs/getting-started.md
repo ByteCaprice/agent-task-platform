@@ -73,6 +73,37 @@ The example invokes deterministic local Tool implementations through Tool Gatewa
 
 If you submit the same `caller`, `route_tag`, and `request_id` again, the platform returns the existing logical Run. Change `REQUEST_ID` to create new work.
 
+## Run from an Installed Wheel
+
+A release wheel can be installed and initialized without a source checkout. Obtain a wheel artifact from a trusted release/build process; there is no published stable release yet.
+
+```bash
+python3 -m venv /opt/agent-task-platform
+/opt/agent-task-platform/bin/python -m pip install ./agent_task_platform-<version>-py3-none-any.whl
+/opt/agent-task-platform/bin/agent-task-platform init-config --config-dir /etc/agent-task-platform
+```
+
+Copy `/etc/agent-task-platform/.env.profile.example` to `/etc/agent-task-platform/.env` and fill in the database connection, API key, callback secret, and any provider settings. Protect that file as a secret-bearing configuration file. Apply packaged migrations explicitly, then start the service:
+
+```bash
+/opt/agent-task-platform/bin/agent-task-platform migrate --config-dir /etc/agent-task-platform
+/opt/agent-task-platform/bin/agent-task-platform serve --config-dir /etc/agent-task-platform
+```
+
+`init-config` refuses to overwrite existing files unless `--force` is passed. Startup does not automatically apply migrations. The installed wheel includes the CLI, configuration templates, and migration history; this path does not use repository scripts or source-tree SQL artifacts.
+
+## Run with Docker Compose
+
+From a source checkout containing `Dockerfile` and `compose.yaml`, set a database password and start the database, one-shot migration, API-only process, and worker:
+
+```bash
+export POSTGRES_PASSWORD="$(openssl rand -hex 32)"
+# Set AUTH__API_KEYS to a JSON array of scoped key objects before exposing the API.
+docker compose up --build -d
+```
+
+Compose publishes the API on port `8765` by default (`API_PORT` changes the host port), persists PostgreSQL data in a named volume, waits for the database health check, and waits for the migration service to complete before starting API and worker. The compose defaults do not constitute production secret management or network hardening. Set strong credentials and review the exposed port, database access, API scopes, backups, and network policy before use. Use `docker compose logs -f api worker migrate` to inspect startup and `docker compose down` to stop services; `docker compose down -v` also deletes the database volume and its data.
+
 ## 5. Explore the Service
 
 - Open `http://127.0.0.1:8765/docs` for interactive OpenAPI documentation.

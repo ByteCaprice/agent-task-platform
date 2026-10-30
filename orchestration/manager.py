@@ -14,7 +14,7 @@ from typing import Any
 from domain import AgentRun, LogEvent, RunSubmission, utc_now
 from domain.enums import ErrorType, RunStatus
 from domain.enums.run import EXECUTING_RUN_STATUSES, TERMINAL_RUN_STATUSES
-from framework.registry import AgentRegistry
+from framework.registry import AgentRegistry, RegistryError
 from framework.runtime import AgentRuntime
 from framework.tool.error_handlers import RunErrorHandlers
 from framework.tool.hooks import RunHooks
@@ -198,17 +198,28 @@ class RunManager:
             ],
             limit,
         )
+        recovered = 0
         for run in records:
             if run.status == RunStatus.CANCELED:
                 continue
-            agent = self.agent_registry.resolve(
-                run.route_tag,
-                version=run.agent.version if run.agent else None,
-                caller=run.caller,
-                metadata=run.metadata,
-                rollout_key=run.request_id,
-            )
+            now = utc_now()
+            if run.worker is not None and run.lease_expire_time is not None and run.lease_expire_time > now:
+                continue
+            try:
+                agent = self.agent_registry.resolve(
+                    run.route_tag,
+                    version=run.agent.version if run.agent else None,
+                    caller=run.caller,
+                    metadata=run.metadata,
+                    rollout_key=run.request_id,
+                )
+            except RegistryError:
+                logger.warning("Skipping recovery for run %s: route %s is unavailable", run.run_id, run.route_tag)
+                continue
             was_executing = run.status in EXECUTING_RUN_STATUSES
+            previous_status = run.status
+            previous_worker = run.worker
+            previous_expiry = run.lease_expire_time
             run.status = RunStatus.QUEUED
             if was_executing and run.attempts > 0:
                 # A process/lease loss is not a completed business attempt. Re-enter
@@ -219,9 +230,17 @@ class RunManager:
             run.max_attempts = agent.retry_policy.max_attempts
             run.worker = None
             run.lease_expire_time = None
-            self.store.runs.update(run)
-            self._start_background(run.run_id)
-        return len(records)
+            if self.store.runs.update_if_current(
+                run,
+                expected_statuses={previous_status},
+                expected_worker=previous_worker,
+                match_worker=True,
+                expected_lease_expire_time=previous_expiry,
+                match_lease_expire_time=True,
+            ):
+                self._start_background(run.run_id)
+                recovered += 1
+        return recovered
 
     async def compensate_callbacks(self, limit: int = 100) -> int:
         # Retry pending work and interrupted failures with attempts remaining.
@@ -229,30 +248,35 @@ class RunManager:
         return await self.callback_service.dispatch_pending(limit=limit)
 
     def dispatch_ready(self, *, worker_id: str, lease_seconds: float, limit: int = 20) -> int:
-        claimed = self.store.runs.claim_ready(
-            worker_id=worker_id,
-            lease_seconds=lease_seconds,
-            limit=limit,
-        )
-        dispatched = 0
-        for run in claimed:
-            if self._start_background(run.run_id, worker_id=worker_id, lease_seconds=lease_seconds):
-                self.store.logs.add(
-                    LogEvent(
-                        run_id=run.run_id,
-                        trace_id=run.trace_id,
-                        component="worker",
-                        event_type="runtime_dispatched",
-                        message="Worker dispatched ready runtime",
-                        data={
-                            "agent": run.agent.name if run.agent else None,
-                            "route_tag": run.route_tag,
-                            "priority": run.priority,
-                        },
+        # Keep the active-run snapshot, DB claims, and local registrations in one
+        # critical section so a concurrent local start cannot slip between them.
+        with self._background_lock:
+            active_run_ids = {run_id for run_id, task in self._background_by_run_id.items() if not task.done()}
+            claimed = self.store.runs.claim_ready(
+                worker_id=worker_id,
+                lease_seconds=lease_seconds,
+                limit=limit,
+                exclude_run_ids=active_run_ids,
+            )
+            dispatched = 0
+            for run in claimed:
+                if self._start_background(run.run_id, worker_id=worker_id, lease_seconds=lease_seconds):
+                    self.store.logs.add(
+                        LogEvent(
+                            run_id=run.run_id,
+                            trace_id=run.trace_id,
+                            component="worker",
+                            event_type="runtime_dispatched",
+                            message="Worker dispatched ready runtime",
+                            data={
+                                "agent": run.agent.name if run.agent else None,
+                                "route_tag": run.route_tag,
+                                "priority": run.priority,
+                            },
+                        )
                     )
-                )
-                dispatched += 1
-        return dispatched
+                    dispatched += 1
+            return dispatched
 
     def reclaim_expired_leases(self, *, limit: int = 100) -> int:
         now = utc_now()
@@ -272,12 +296,24 @@ class RunManager:
                     )
                 )
                 continue
+            previous_status = run.status
+            previous_worker = run.worker
+            previous_expiry = run.lease_expire_time
             run.status = RunStatus.QUEUED
             if run.attempts > 0:
                 run.attempts -= 1
             run.worker = None
             run.lease_expire_time = None
-            self.store.runs.update(run)
+            reclaimed_row = self.store.runs.update_if_current(
+                run,
+                expected_statuses={previous_status},
+                expected_worker=previous_worker,
+                match_worker=True,
+                expected_lease_expire_time=previous_expiry,
+                match_lease_expire_time=True,
+            )
+            if not reclaimed_row:
+                continue
             self.store.logs.add(
                 LogEvent(
                     run_id=run.run_id,
@@ -355,16 +391,20 @@ class RunManager:
         lease_seconds: float | None = None,
     ) -> None:
         renewal_task: asyncio.Task[Any] | None = None
+        execution_task = asyncio.create_task(self.run_now(run_id, worker_id=worker_id))
         if worker_id and lease_seconds and lease_seconds > 0:
             renewal_task = asyncio.create_task(
                 self._renew_queue_lease_until_done(
                     run_id=run_id,
                     worker_id=worker_id,
                     lease_seconds=lease_seconds,
+                    execution_task=execution_task,
                 )
             )
         try:
-            await self.run_now(run_id, worker_id=worker_id)
+            await execution_task
+        except asyncio.CancelledError:
+            raise
         except Exception as exc:
             run = self.store.runs.get(run_id)
             if run:
@@ -389,6 +429,7 @@ class RunManager:
         run_id: str,
         worker_id: str,
         lease_seconds: float,
+        execution_task: asyncio.Task[Any],
     ) -> None:
         interval = max(0.01, lease_seconds / 3)
         while True:
@@ -410,6 +451,7 @@ class RunManager:
                         data={"worker_id": worker_id},
                     )
                 )
+                execution_task.cancel()
                 return
 
     def _require_run(self, run_id: str) -> AgentRun:

@@ -21,9 +21,11 @@ from typing import Any
 
 from sqlalchemy import Engine, create_engine, delete
 from sqlalchemy.engine import URL
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
 from domain import AgentRun, CallbackDelivery, utc_now
+from infra.store.errors import UniqueConstraintConflictError
 from infra.store.model import (
     AiCallback,
     AiModelCall,
@@ -93,8 +95,13 @@ class SqlAlchemyRunStore:
 
         Application services own the transaction boundary via this context.
         """
-        with self._sf.begin() as s:
-            yield s
+        try:
+            with self._sf.begin() as s:
+                yield s
+        except IntegrityError as exc:
+            if getattr(exc.orig, "pgcode", None) == "23505":
+                raise UniqueConstraintConflictError("A unique persistence key already exists") from exc
+            raise
 
     def update_run_with_callback(
         self,

@@ -8,6 +8,7 @@ from framework.registry import AgentRegistry, RegistryError
 from framework.skill.errors import SkillError
 from framework.skill.runtime import SkillRuntime
 from infra.store import RunStore
+from infra.store.errors import UniqueConstraintConflictError
 from orchestration.conversation_service import ConversationService
 
 
@@ -86,18 +87,31 @@ class RunService:
         external_id = submission.external_id or submission.request_id
         run.update_time = utc_now()
         # 一个事务里同时建/取会话 + 建 run，保证两者要么都成功要么都回滚
-        with self.store.unit_of_work() as uow:
-            conversation = self.conversations.get_or_create(
-                caller=submission.caller,
-                external_id=external_id,
-                route_tag=submission.route_tag,
-                task_type=submission.task_type,
-                source=submission.source,
-                conversation_id=submission.conversation_id,
-                conn=uow,
-            )
-            run.conversation_id = conversation.conversation_id
-            self.store.runs.create(run, conn=uow)
+        for transaction_attempt in range(2):
+            try:
+                with self.store.unit_of_work() as uow:
+                    conversation = self.conversations.get_or_create(
+                        caller=submission.caller,
+                        external_id=external_id,
+                        route_tag=submission.route_tag,
+                        task_type=submission.task_type,
+                        source=submission.source,
+                        conversation_id=submission.conversation_id,
+                        conn=uow,
+                    )
+                    run.conversation_id = conversation.conversation_id
+                    self.store.runs.create(run, conn=uow)
+                break
+            except UniqueConstraintConflictError:
+                # The failed transaction has rolled back. A concurrent submit may
+                # have won either the Run key or the shared Conversation key.
+                existing = self.store.runs.get_by_request_id(
+                    submission.caller, submission.route_tag, submission.request_id
+                )
+                if existing:
+                    return existing, False
+                if transaction_attempt:
+                    raise
 
         self.store.logs.add(
             LogEvent(

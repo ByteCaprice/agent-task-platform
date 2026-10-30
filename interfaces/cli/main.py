@@ -6,7 +6,9 @@ from __future__ import annotations
 import argparse
 import asyncio
 import os
+import shutil
 import sys
+from pathlib import Path
 from typing import Any
 
 import uvicorn
@@ -25,6 +27,12 @@ def main(argv: list[str] | None = None) -> None:
     if args.command == "check-config":
         _check_config(args)
         return
+    if args.command in {"init-config", "init"}:
+        _init_config(args)
+        return
+    if args.command == "migrate":
+        _migrate(args)
+        return
     _run_server(args)
 
 
@@ -41,6 +49,7 @@ def _run_server(args: argparse.Namespace) -> None:
         }
         _configure_logging(parent_settings, "api", config_dir=args.config_dir)
         os.environ["AGENT_TASK_PLATFORM_CONFIG_DIR"] = args.config_dir
+        os.environ["AGENT_TASK_PLATFORM_API_ONLY"] = str(args.api_only).lower()
         uvicorn.run(
             "interfaces.cli.main:create_app_for_uvicorn",
             factory=True,
@@ -52,7 +61,7 @@ def _run_server(args: argparse.Namespace) -> None:
         )
         return
     _configure_logging(settings, "api", config_dir=args.config_dir)
-    app = create_app(args.config_dir)
+    app = create_app(args.config_dir, execution_enabled=not args.api_only)
     uvicorn.run(
         app,
         host=host,
@@ -66,7 +75,8 @@ def create_app_for_uvicorn():
     config_dir = os.environ.get("AGENT_TASK_PLATFORM_CONFIG_DIR", "config")
     settings = _load_settings(config_dir)
     _configure_logging(settings, "api", config_dir=config_dir)
-    return create_app(config_dir)
+    api_only = os.environ.get("AGENT_TASK_PLATFORM_API_ONLY", "false").lower() == "true"
+    return create_app(config_dir, execution_enabled=not api_only)
 
 
 def worker_main(argv: list[str] | None = None) -> None:
@@ -175,6 +185,12 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     check = subparsers.add_parser("check-config", help="Validate config and initialize the configured store")
     check.add_argument("--config-dir", default="config")
 
+    init = subparsers.add_parser("init-config", aliases=["init"], help="Copy packaged configuration templates")
+    init.add_argument("--config-dir", default="config")
+    init.add_argument("--force", action="store_true", help="Overwrite existing files")
+
+    migrate = subparsers.add_parser("migrate", help="Apply packaged database migrations")
+    migrate.add_argument("--config-dir", default="config")
     return parser.parse_args(argv)
 
 
@@ -183,6 +199,34 @@ def _add_server_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--host", default=None)
     parser.add_argument("--port", default=None, type=int)
     parser.add_argument("--reload", action=argparse.BooleanOptionalAction, default=None)
+    parser.add_argument("--api-only", action="store_true", help="Do not recover or execute runs in this process")
+
+
+def _init_config(args: argparse.Namespace) -> None:
+    source = Path(__file__).resolve().parent.parent / "resources" / "config"
+    destination = Path(args.config_dir).resolve()
+    templates = sorted(item for item in source.iterdir() if item.is_file())
+    if not args.force:
+        existing = [destination / item.name for item in templates if (destination / item.name).exists()]
+        if existing:
+            names = ", ".join(str(path) for path in existing)
+            raise FileExistsError(f"Refusing to overwrite {names}; pass --force to replace them")
+    destination.mkdir(parents=True, exist_ok=True)
+    for template in templates:
+        shutil.copyfile(template, destination / template.name)
+    print(f"configuration templates installed in {destination}")
+
+
+def _migrate(args: argparse.Namespace) -> None:
+    from alembic import command
+    from alembic.config import Config
+
+    resources = Path(__file__).resolve().parent.parent / "resources"
+    config = Config()
+    config.set_main_option("script_location", str(resources / "migrations"))
+    config.set_main_option("sqlalchemy.url", "")
+    os.environ["AGENT_TASK_PLATFORM_CONFIG_DIR"] = str(Path(args.config_dir).resolve())
+    command.upgrade(config, "head")
 
 
 def _add_worker_args(parser: argparse.ArgumentParser) -> None:

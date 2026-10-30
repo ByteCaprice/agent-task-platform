@@ -1,6 +1,6 @@
 # Deployment
 
-Agent Task Platform has four operational dependencies: application processes, PostgreSQL, extension dependencies, and outbound destinations such as model providers, Tools, and callbacks. PostgreSQL is the durable source of execution state.
+Agent Task Platform has four operational dependencies: application processes, PostgreSQL, extension dependencies, and outbound destinations such as model providers, Tools, and callbacks. PostgreSQL is the durable source of execution state. The project is pre-release and intended for trusted, single-tenant deployments; it is not a tenant-isolation boundary.
 
 ## Process Topology
 
@@ -17,7 +17,7 @@ agent-task-platform worker --config-dir /etc/agent-task-platform
 
 All API and worker processes must use the same database and compatible code, migration, registry, and extension versions. Workers use queue leases; size lease duration, shutdown timeout, and Agent timeouts together.
 
-The current CLI does not provide an API-only mode that disables in-process execution. Account for API replicas as execution capacity when calculating concurrency.
+Use `serve --api-only` for API processes that should not recover or execute Runs locally; run one or more standalone `worker` processes for execution capacity. Without `--api-only`, each `serve` process also executes queued work. API-only mode is a process-role control, not a tenant or security boundary.
 
 ## Release Order
 
@@ -113,7 +113,7 @@ Monitor and tune:
 - Pi child-process count, memory, startup latency, and model throughput
 - Callback dispatcher backlog
 
-The coordination backend and PostgreSQL protect shared limits, but every extension must still be designed for retries, cancellation, and duplicate-delivery boundaries.
+The coordination backend and PostgreSQL protect shared limits, but every extension must still be designed for retries, cancellation, and duplicate-delivery boundaries. A committed Run or recovery mechanism cannot guarantee exactly-once effects at a remote service; use destination-side idempotency and provide operator reconciliation for ambiguous outcomes.
 
 ## Observability
 

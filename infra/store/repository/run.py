@@ -49,6 +49,8 @@ class RunRepository(BaseRepository):
         expected_statuses: set[RunStatus] | frozenset[RunStatus],
         expected_worker: str | None = None,
         match_worker: bool = False,
+        expected_lease_expire_time=None,
+        match_lease_expire_time: bool = False,
         conn: Any | None = None,
     ) -> bool:
         """Atomically persist a run only while its state and owner are current."""
@@ -66,6 +68,12 @@ class RunRepository(BaseRepository):
         if match_worker:
             conditions.append(
                 AiAgentRun.worker.is_(None) if expected_worker is None else AiAgentRun.worker == expected_worker
+            )
+        if match_lease_expire_time:
+            conditions.append(
+                AiAgentRun.lease_expire_time.is_(None)
+                if expected_lease_expire_time is None
+                else AiAgentRun.lease_expire_time == expected_lease_expire_time
             )
         with self._write(conn) as session:
             result = session.execute(update(AiAgentRun).where(*conditions).values(**values))
@@ -135,34 +143,39 @@ class RunRepository(BaseRepository):
     # ------------------------------------------------------------------
     # Scheduling (queue folded into the run table): claim / lease / reclaim
     # ------------------------------------------------------------------
-    def claim_ready(self, *, worker_id: str, lease_seconds: float, limit: int = 20) -> list[AgentRun]:
+    def claim_ready(
+        self, *, worker_id: str, lease_seconds: float, limit: int = 20, exclude_run_ids: set[str] | None = None
+    ) -> list[AgentRun]:
         now = utc_now()
         lease_expire_time = now + timedelta(seconds=lease_seconds)
         claimed: list[AgentRun] = []
         with self._sf.begin() as s:
+            statement = select(AiAgentRun).where(
+                or_(
+                    and_(
+                        AiAgentRun.status == RunStatus.QUEUED.value,
+                        or_(AiAgentRun.run_after.is_(None), AiAgentRun.run_after <= now),
+                    ),
+                    and_(
+                        AiAgentRun.status.in_(
+                            [
+                                RunStatus.RUNNING.value,
+                                RunStatus.WAITING_TOOL.value,
+                                RunStatus.RETRYING.value,
+                            ]
+                        ),
+                        AiAgentRun.lease_expire_time.isnot(None),
+                        AiAgentRun.lease_expire_time <= now,
+                    ),
+                )
+            )
+            if exclude_run_ids:
+                statement = statement.where(AiAgentRun.id.notin_(exclude_run_ids))
             entities = (
                 s.execute(
-                    select(AiAgentRun)
-                    .where(
-                        or_(
-                            and_(
-                                AiAgentRun.status == RunStatus.QUEUED.value,
-                                or_(AiAgentRun.run_after.is_(None), AiAgentRun.run_after <= now),
-                            ),
-                            and_(
-                                AiAgentRun.status.in_(
-                                    [
-                                        RunStatus.RUNNING.value,
-                                        RunStatus.WAITING_TOOL.value,
-                                        RunStatus.RETRYING.value,
-                                    ]
-                                ),
-                                AiAgentRun.lease_expire_time.isnot(None),
-                                AiAgentRun.lease_expire_time <= now,
-                            ),
-                        )
+                    statement.order_by(
+                        AiAgentRun.priority.desc(), AiAgentRun.run_after.asc(), AiAgentRun.create_time.asc()
                     )
-                    .order_by(AiAgentRun.priority.desc(), AiAgentRun.run_after.asc(), AiAgentRun.create_time.asc())
                     .limit(limit)
                     .with_for_update(skip_locked=True)
                 )

@@ -196,15 +196,22 @@ def test_kanban_run_detail_returns_404_for_unknown_run(tmp_path) -> None:
     response = client.get("/v1/kanban/runs/RUN-missing", headers={"x-api-key": "test-key"})
 
     assert response.status_code == 404
-    assert response.json()["error"]["message"] == "run not found"
+    assert response.json() == {"error": {"code": "NOT_FOUND", "message": "The requested resource was not found"}}
 
 
-def test_kanban_cancel_action_reuses_run_manager_without_api_key(tmp_path) -> None:
+def test_kanban_cancel_action_requires_api_key_and_reuses_run_manager(tmp_path) -> None:
     client, app = _client(tmp_path)
     run = _run(request_id="req-cancel", status=RunStatus.QUEUED)
     app.state.store.runs.create(run)
 
-    response = client.post(f"/v1/kanban/runs/{run.run_id}/cancel")
+    rejected = client.post(f"/v1/kanban/runs/{run.run_id}/cancel")
+    assert rejected.status_code == 403
+    assert rejected.json() == {
+        "error": {"code": "FORBIDDEN", "message": "You do not have permission to perform this action"}
+    }
+    assert app.state.store.runs.get(run.run_id).status == RunStatus.QUEUED
+
+    response = client.post(f"/v1/kanban/runs/{run.run_id}/cancel", headers={"x-api-key": "test-key"})
 
     assert response.status_code == 200
     assert response.json()["status"] == "CANCELED"

@@ -21,8 +21,13 @@ config/.env.*
 temp/
 .local-deploy/
 dist/
+build/
+.docker/
 node_modules/
 .next/
 out/
 *.tsbuildinfo
 *.egg-info/
+# Local credentials and runtime logs must never be published.
+dev-config.txt
+logs/

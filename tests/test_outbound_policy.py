@@ -83,6 +83,26 @@ def test_policy_class_allowlist_canonical_matching() -> None:
         policy.validate("https://evil.com/allowed/a.png")
 
 
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/../admin",
+        "/api/%2e%2e/admin",
+        "/api/%2E%2E/admin",
+        "/api/%2e%2e%2fadmin",
+        "/api/%252e%252e/admin",
+        "/api%2f..%2fadmin",
+    ],
+)
+def test_policy_class_rejects_encoded_or_raw_path_traversal(path: str) -> None:
+    policy = OutboundPolicy(
+        allowlist=["https://files.example.com/api/"],
+        block_private_networks=False,
+    )
+    with pytest.raises(OutboundPolicyError, match="path"):
+        policy.validate(f"https://files.example.com{path}")
+
+
 def test_policy_class_allowlist_userinfo_does_not_bypass() -> None:
     """Userinfo in URL should not bypass hostname-based allowlist.
 

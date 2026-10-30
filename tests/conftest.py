@@ -13,6 +13,7 @@ the suite to run.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -87,6 +88,25 @@ def _pg_container():
     from testcontainers.postgres import PostgresContainer
 
     from infra.store.model import metadata
+
+    test_url = os.environ.get("ATP_TEST_DATABASE_URL")
+    if test_url:
+        u = make_url(test_url)
+        # Every test truncates all platform tables. Never allow an ordinary
+        # application database (including shared SIT) through this opt-in path.
+        if (
+            u.get_backend_name() != "postgresql"
+            or u.host not in {"localhost", "127.0.0.1", "::1"}
+            or not (u.database or "").startswith("atp_test_")
+        ):
+            raise ValueError("ATP_TEST_DATABASE_URL requires a loopback PostgreSQL database named atp_test_*")
+        _PG.update(url=test_url, host=u.host, port=u.port, user=u.username, password=u.password, name=u.database)
+        engine = create_engine(test_url)
+        metadata.create_all(engine)
+        engine.dispose()
+        yield None
+        _PG.clear()
+        return
 
     with PostgresContainer("postgres:16-alpine") as pg:
         url = pg.get_connection_url()  # postgresql+psycopg2://test:test@host:port/test

@@ -134,6 +134,9 @@ class RunExecutor:
                 # —— 成功路径 ——
                 run = self._require_run(run_id)  # 重新读，拿执行期间可能更新的最新行
                 run.output = output
+                run.error_type = None
+                run.error_message = None
+                run.dead_letter_reason = None
                 run.status = RunStatus.AGENT_SUCCEEDED
                 run.current_step = "callback"
                 run.finish_time = utc_now()
@@ -371,6 +374,9 @@ class RunExecutor:
             # 可选：把原始错误塞进输出，方便上游知道"这是兜底结果"
             output.setdefault("_error", run.error_message or "error handled by recovery")
         run.output = output
+        run.error_type = None
+        run.error_message = None
+        run.dead_letter_reason = None
         run.status = RunStatus.SUCCEEDED
         run.current_step = "error_recovery"
         run.finish_time = utc_now()

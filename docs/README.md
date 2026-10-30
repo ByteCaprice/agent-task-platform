@@ -48,6 +48,8 @@ The built-in examples are deterministic and do not require a model provider. Sta
 
 The running service exposes its exact OpenAPI schema at `/openapi.json` and interactive API documentation at `/docs`.
 
+For contribution and release-policy information, see [Contributing](../CONTRIBUTING.md), [Security](../SECURITY.md), and the [Changelog](../CHANGELOG.md).
+
 ## Sources of Truth
 
 Documentation explains behavior, but these files define it:

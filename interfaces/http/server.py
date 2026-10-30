@@ -63,7 +63,12 @@ from orchestration.worker import RunWorker
 logger = logging.getLogger(__name__)
 
 
-def create_app(config_dir: str | Path | None = None, *, auto_start: bool = True) -> FastAPI:
+def create_app(
+    config_dir: str | Path | None = None,
+    *,
+    auto_start: bool = True,
+    execution_enabled: bool = True,
+) -> FastAPI:
     root = Path(config_dir or "config").resolve()
     os.environ["AGENT_TASK_PLATFORM_CONFIG_DIR"] = str(root)
     bootstrap_settings = load_settings(root)
@@ -79,13 +84,22 @@ def create_app(config_dir: str | Path | None = None, *, auto_start: bool = True)
     hooks = LoggingHooks(store)
     agent_registry = _load_agent_registry(root / "agents.yaml", store)
     tool_registry = _load_tool_registry(root / "tools.yaml", store)
-    skill_root = Path(settings.get("skills", {}).get("artifact_root", root.parent / "plugins" / "skills")).resolve()
+    default_skill_root = root.parent / "plugins" / "skills"
+    if not default_skill_root.is_dir():
+        default_skill_root = Path(__file__).resolve().parent.parent / "resources" / "skills"
+    skill_root = Path(settings.get("skills", {}).get("artifact_root", default_skill_root)).resolve()
     skill_loader = SkillLoader(skill_root)
     skill_registry = _load_skill_registry(root / "skills.yaml", store, loader=skill_loader)
     skill_runtime = SkillRuntime(registry=skill_registry, loader=skill_loader)
 
     coordination = create_coordination_backend(settings)
-    tool_gateway = ToolGateway(registry=tool_registry, store=store, hooks=hooks, coordination=coordination)
+    tool_gateway = ToolGateway(
+        registry=tool_registry,
+        store=store,
+        hooks=hooks,
+        coordination=coordination,
+        trusted_private_http_endpoints=settings.get("outbound", {}).get("tool_private_url_allowlist", []),
+    )
     scheduler = RunScheduler(
         store=store,
         limits=SchedulerLimits(
@@ -125,7 +139,7 @@ def create_app(config_dir: str | Path | None = None, *, auto_start: bool = True)
         runtime=runtime,
         scheduler=scheduler,
         callback_service=callback_service,
-        auto_start=auto_start,
+        auto_start=auto_start and execution_enabled,
         cancellation_events=cancellation_events,
         hooks=hooks,
     )
@@ -191,15 +205,13 @@ def create_app(config_dir: str | Path | None = None, *, auto_start: bool = True)
         hot_reload_task = None
         callback_dispatch_task = None
         await _register_mcp_tools(tool_registry, agent_registry)
-        if auto_start:
+        if auto_start and execution_enabled:
             manager.recover_incomplete()
             await manager.compensate_callbacks()
+        if auto_start or not execution_enabled:
             hot_reload_task = asyncio.create_task(config_watcher.run_forever())
             callback_dispatch_task = asyncio.create_task(
-                _dispatch_callbacks_forever(
-                    callback_service,
-                    settings=settings,
-                )
+                _dispatch_callbacks_forever(callback_service, settings=settings)
             )
         try:
             yield

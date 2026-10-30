@@ -44,6 +44,13 @@ class AgentRegistry:
         return cls([AgentSpec.model_validate(item) for item in payload.get("agents", [])])
 
     def register(self, agent: AgentSpec, *, make_default: bool = True) -> None:
+        # Validate every route before changing either registry map. A rejected
+        # registration must not leave a discoverable agent or partial routes.
+        if agent.enabled and make_default:
+            for route_tag in agent.route_tags:
+                existing = self._routes.get(route_tag)
+                if existing and existing.name != agent.name:
+                    raise RegistryError(f"route_tag {route_tag!r} is already routed to {existing.name!r}")
         key = (agent.name, agent.version)
         previous = self._agents.get(key)
         if previous:
@@ -59,9 +66,6 @@ class AgentRegistry:
                         self._routes[route_tag] = replacement
             return
         for route_tag in agent.route_tags:
-            existing = self._routes.get(route_tag)
-            if existing and existing.name != agent.name:
-                raise RegistryError(f"route_tag {route_tag!r} is already routed to {existing.name!r}")
             self._routes[route_tag] = agent
 
     def disable(self, name: str, version: str | None = None) -> list[AgentSpec]:
@@ -109,6 +113,7 @@ class AgentRegistry:
             existing = self._routes.get(route_tag)
             if existing and existing.name != agent.name:
                 raise RegistryError(f"route_tag {route_tag!r} is already routed to {existing.name!r}")
+        for route_tag in agent.route_tags:
             self._routes[route_tag] = agent
         return agent
 

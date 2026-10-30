@@ -103,6 +103,14 @@ Callbacks are optional. Model settings are only required for Agents that invoke 
 
 Callback URLs must pass outbound policy and `CALLBACK__URL_ALLOWLIST`. Configure a signing secret when receivers need to authenticate payloads. A successful Agent result and successful callback delivery are separate persisted states.
 
+HTTP Tools are checked against outbound URL policy at invocation time. Private and loopback destinations are denied by default. For a deliberately trusted internal service, configure its exact URL or narrowly scoped URL prefix explicitly:
+
+```dotenv
+OUTBOUND__TOOL_PRIVATE_URL_ALLOWLIST=["http://internal-service:8080/api/"]
+```
+
+This setting grants trusted registry-configured HTTP Tools access to matching private destinations; never derive it from request or model input. DNS is checked before connect but not pinned, so this setting does not solve DNS rebinding; use network egress controls too. File fetches and HTTP Tool requests do not follow redirects.
+
 The Pi runtime snapshots these model defaults at the start of each attempt, then applies top-level Agent runtime fields and `runtime.model_config` overrides. Database-managed model changes therefore apply to later Pi attempts without mutating an in-flight attempt. Pi-specific limits and unsupported fallback/provider-native features are documented in [Pi Agent Runtime](../guides/pi-runtime.md).
 
 ## Registries
@@ -123,7 +131,8 @@ At startup, YAML inserts only missing `(name, version)` pairs. It never overwrit
 | `callback` | retries, signing, allowlist, dispatch | Bootstrap or database-managed |
 | `model` | endpoint, credential, model, retries, fallback | Bootstrap or database-managed |
 | `rate_limit` | token-bucket defaults and caller overrides | Bootstrap or database-managed |
-| `logging` | level, body bound, file rotation | Mixed; file location remains bootstrap-only |
+| `logging` | level, body bound, payload opt-in, file rotation | Mixed; file location remains bootstrap-only |
+| `outbound` | trusted private HTTP Tool URL allowlist | Bootstrap only |
 | `retention` | log, callback, and model-call age | Bootstrap or database-managed |
 | `platform_config` | database ownership and initialization | Bootstrap only |
 
@@ -165,9 +174,10 @@ LOGGING__DIRECTORY=logs
 LOGGING__MAX_FILE_SIZE_MB=100
 LOGGING__RETENTION_DAYS=30
 LOGGING__LEVEL=info
+LOGGING__LOG_PAYLOADS=false
 ```
 
-Relative directories are resolved from the project directory containing `config/`. Files use names such as `api.2026-10-27.log` and `api.2026-10-27.1.log`; expired calendar days are removed when a handler starts or the date changes.
+HTTP request/response logs include metadata only by default. Set `LOGGING__LOG_PAYLOADS=true` only when bounded request payload logging is necessary; this can expose sensitive data. Response bodies, including streaming responses, are not buffered for logging. Relative directories are resolved from the project directory containing `config/`. Files use names such as `api.2026-10-27.log` and `api.2026-10-27.1.log`; expired calendar days are removed when a handler starts or the date changes.
 
 ## Related Guides
 

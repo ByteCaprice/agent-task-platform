@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-import itertools
+import logging
 from pathlib import Path
+from uuid import uuid4
 
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine import make_url
@@ -22,13 +23,11 @@ EXPECTED_TABLES = {
     "ai_api_key_config",
 }
 
-_counter = itertools.count()
-
 
 def _fresh_db_url(pg_url: str) -> str:
     """Create a brand-new empty database on the test container and return its URL."""
     base = make_url(pg_url)
-    dbname = f"alembic_test_{next(_counter)}"
+    dbname = f"alembic_test_{uuid4().hex}"
     admin = create_engine(base, isolation_level="AUTOCOMMIT")
     with admin.connect() as conn:
         conn.execute(text(f'CREATE DATABASE "{dbname}"'))
@@ -49,7 +48,10 @@ def test_alembic_migration_creates_all_tables(pg_url) -> None:
     from alembic import command
 
     url = _fresh_db_url(pg_url)
+    application_logger = logging.getLogger("agent_task_platform.http")
+    application_logger.disabled = False
     command.upgrade(_alembic_config(url), "head")
+    assert not application_logger.disabled, "Running migrations must not disable application logging"
 
     engine = create_engine(url)
     actual_tables = set(inspect(engine).get_table_names())

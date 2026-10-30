@@ -73,9 +73,9 @@ cp config/.env.dev.example config/.env.dev
 Edit `config/.env.dev` before starting. Replace `REPLACE_WITH_LOCAL_KEY` and `REPLACE_WITH_LOCAL_CALLBACK_SECRET` with locally generated values. The included examples do not need a model provider key.
 
 ```bash
-ENV_MODE=dev alembic upgrade head
+ENV_MODE=dev uv run alembic upgrade head
 ENV_MODE=dev psql agent_task_platform_dev -f sql/seed.dml.sql
-ENV_MODE=dev agent-task-platform serve
+ENV_MODE=dev uv run agent-task-platform serve --config-dir config
 ```
 
 In another terminal, submit the offline calculator example:
@@ -109,6 +109,8 @@ The response is `202 Accepted` and includes `run_id`, `trace_id`, and `conversat
 - [Documentation Hub and Reading Paths](docs/README.md)
 - [Getting Started](docs/getting-started.md)
 - [Contributing](CONTRIBUTING.md)
+- [Security Policy](SECURITY.md)
+- [Changelog](CHANGELOG.md)
 - [Development Workflow](docs/development.md)
 - [Architecture](docs/architecture.md)
 - [Technical Report](TECHNICAL_REPORT.md)
@@ -159,9 +161,9 @@ The integration suite starts PostgreSQL with Testcontainers, so Docker must be a
 uv run python scripts/gen_sql.py
 ```
 
-## Status
+## Scope and Status
 
-This project is preparing for its first public release. Do not treat the current API, plugin contracts, or database schema as stable until a versioned release is published.
+This project is preparing for its first public release. It is designed for trusted, single-tenant deployments, not as a multi-tenant isolation boundary. Do not treat the current API, plugin contracts, or database schema as stable until a versioned release is published. PostgreSQL persistence and recovery do not guarantee exactly-once external side effects: retries, cancellation, process loss, or an ambiguous remote response can still require application-level idempotency and operator reconciliation. Python extensions run as trusted code, not in a sandbox.
 
 ## License
 

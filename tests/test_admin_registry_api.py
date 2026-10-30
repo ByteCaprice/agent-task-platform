@@ -48,13 +48,19 @@ def test_admin_disable_tool_removes_runtime_access(tmp_path: Path) -> None:
 
     health = client.get("/v1/tools/example-weather/health", headers={"X-API-Key": "test-key"})
     assert health.status_code == 400
-    assert "disabled" in health.json()["error"]["message"]
+    assert health.json() == {
+        "error": {"code": "REGISTRY_ERROR", "message": "The agent or tool registry configuration is invalid"}
+    }
+    assert not next(tool for tool in app.state.store.tools.list() if tool.name == "example-weather").enabled
+    assert not next(tool for tool in app.state.tool_registry.list() if tool.name == "example-weather").enabled
 
 
 def test_duplicate_agent_route_registration_is_rejected(tmp_path: Path) -> None:
     app = create_app(write_config(tmp_path), auto_start=False)
     client = TestClient(app)
 
+    original_route = app.state.agent_registry.routes()["example.tool_agent"].model_dump(mode="json")
+    original_agents = [agent.model_dump(mode="json") for agent in app.state.store.agents.list()]
     response = client.post(
         "/v1/admin/agents",
         json={
@@ -67,4 +73,9 @@ def test_duplicate_agent_route_registration_is_rejected(tmp_path: Path) -> None:
     )
 
     assert response.status_code == 400
-    assert "already routed" in response.json()["error"]["message"]
+    assert response.json() == {
+        "error": {"code": "REGISTRY_ERROR", "message": "The agent or tool registry configuration is invalid"}
+    }
+    assert app.state.agent_registry.routes()["example.tool_agent"].model_dump(mode="json") == original_route
+    assert [agent.model_dump(mode="json") for agent in app.state.store.agents.list()] == original_agents
+    assert app.state.agent_registry.get_optional("conflicting-agent", "1.0.0") is None

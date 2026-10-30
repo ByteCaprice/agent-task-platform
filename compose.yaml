@@ -1,0 +1,55 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-agent_task_platform}
+      POSTGRES_USER: ${POSTGRES_USER:-agent_task_platform}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the environment}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  migrate:
+    build: .
+    command: ["migrate", "--config-dir", "/app/config"]
+    environment: &application-environment
+      DATABASE__BACKEND: postgresql
+      DATABASE__HOST: db
+      DATABASE__PORT: "5432"
+      DATABASE__NAME: ${POSTGRES_DB:-agent_task_platform}
+      DATABASE__USER: ${POSTGRES_USER:-agent_task_platform}
+      DATABASE__PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the environment}
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    build: .
+    command: ["serve", "--api-only", "--config-dir", "/app/config", "--host", "0.0.0.0"]
+    environment:
+      <<: *application-environment
+      AUTH__API_KEYS: ${AUTH__API_KEYS:-[]}
+    ports:
+      - "${API_PORT:-8765}:8765"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  worker:
+    build:
+      context: .
+      target: ${WORKER_BUILD_TARGET:-runtime}
+    command: ["worker", "--config-dir", "/app/config"]
+    environment:
+      <<: *application-environment
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+volumes:
+  postgres-data:

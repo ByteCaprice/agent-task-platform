@@ -20,7 +20,7 @@ import ipaddress
 import socket
 from dataclasses import dataclass, field
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 
 class OutboundPolicyError(ValueError):
@@ -41,8 +41,12 @@ class OutboundPolicy:
         multicast.
     allowlist:
         List of allowed URL prefixes.  Each entry is parsed into
-        ``(scheme, host, path_prefix)`` for canonical comparison rather
+        ``(scheme, host, port, path_prefix)`` for canonical comparison rather
         than raw ``str.startswith``.
+    private_network_allowlist:
+        Explicit trusted URL prefixes exempt from the private-address check.
+        Scheme, host, port, and path must match; normal scheme and denylist
+        checks still apply. Use only for operator-trusted internal endpoints.
     denylist:
         List of denied URL prefixes.  Evaluated before the allowlist.
     dns_timeout:
@@ -52,6 +56,7 @@ class OutboundPolicy:
     allowed_schemes: set[str] = field(default_factory=lambda: {"http", "https"})
     block_private_networks: bool = True
     allowlist: list[str] = field(default_factory=list)
+    private_network_allowlist: list[str] = field(default_factory=list)
     denylist: list[str] = field(default_factory=list)
     dns_timeout: float = 5.0
 
@@ -64,6 +69,7 @@ class OutboundPolicy:
             )
         if not parsed.hostname:
             raise OutboundPolicyError("Outbound URL host is required")
+        self._reject_ambiguous_path(parsed.path)
 
         # Denylist takes precedence
         if self._matches_prefix(url, self.denylist):
@@ -74,7 +80,7 @@ class OutboundPolicy:
             raise OutboundPolicyError("Outbound URL is not allowlisted")
 
         # SSRF: resolve DNS and reject private networks
-        if self.block_private_networks:
+        if self.block_private_networks and not self._matches_prefix(url, self.private_network_allowlist):
             self._reject_private_target(parsed)
 
     def is_allowed(self, url: str) -> bool:
@@ -89,6 +95,22 @@ class OutboundPolicy:
     # Private helpers
     # ------------------------------------------------------------------
 
+    def _reject_ambiguous_path(self, path: str) -> None:
+        """Reject dot-segment and encoded-separator paths that clients/servers
+        may normalize differently from the prefix checked by this policy.
+        """
+        candidate = path or "/"
+        for _ in range(5):
+            if "\\" in candidate or any(part in {".", ".."} for part in candidate.split("/")):
+                raise OutboundPolicyError("Outbound URL path contains ambiguous traversal segments")
+            decoded = unquote(candidate)
+            if decoded.count("/") > candidate.count("/"):
+                raise OutboundPolicyError("Outbound URL path contains an encoded path separator")
+            if decoded == candidate:
+                return
+            candidate = decoded
+        raise OutboundPolicyError("Outbound URL path contains excessive nested encoding")
+
     def _matches_prefix(self, url: str, prefixes: list[str]) -> bool:
         """Check whether *url* matches any prefix in *prefixes*.
 
@@ -97,17 +119,24 @@ class OutboundPolicy:
         ``https://evil.com@files.example.com/``.
         """
         parsed = urlparse(url)
-        canonical = (parsed.scheme.lower(), parsed.hostname.lower() if parsed.hostname else "", parsed.path or "/")
+        canonical = (
+            parsed.scheme.lower(),
+            parsed.hostname.lower() if parsed.hostname else "",
+            parsed.port,
+            parsed.path or "/",
+        )
         for prefix in prefixes:
             p = urlparse(prefix)
             p_scheme = p.scheme.lower()
             p_host = p.hostname.lower() if p.hostname else ""
+            p_port = p.port
             p_path = p.path or "/"
+            self._reject_ambiguous_path(p_path)
             if canonical[0] != p_scheme:
                 continue
-            if canonical[1] != p_host:
+            if canonical[1] != p_host or canonical[2] != p_port:
                 continue
-            if canonical[2].startswith(p_path):
+            if canonical[3].startswith(p_path):
                 return True
         return False
 
@@ -170,7 +199,7 @@ class OutboundPolicy:
         addresses: list[ipaddress.IPv4Address | ipaddress.IPv6Address] = []
         seen: set[str] = set()
         for info in infos:
-            ip_str = info[4][0]
+            ip_str = str(info[4][0])
             if ip_str in seen:
                 continue
             seen.add(ip_str)

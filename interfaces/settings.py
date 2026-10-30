@@ -144,6 +144,11 @@ class AlertsSection(_Section):
     pass
 
 
+class OutboundSection(_Section):
+    # Explicit trusted destinations for HTTP Tools that must reach private networks.
+    tool_private_url_allowlist: list[str] = Field(default_factory=list)
+
+
 class LoggingSection(_Section):
     level: Literal["debug", "info", "warning", "warn", "error", "critical", "fatal", "notset"] = "info"
     file_enabled: bool = False
@@ -151,6 +156,7 @@ class LoggingSection(_Section):
     max_file_size_mb: int = Field(default=100, gt=0)
     retention_days: int = Field(default=100, gt=0)
     max_body_chars: int = Field(default=4096, gt=0)
+    log_payloads: bool = False
 
     @field_validator("level", mode="before")
     @classmethod
@@ -190,6 +196,7 @@ class SettingsSnapshot(BaseModel):
     rate_limit: RateLimitSection = Field(default_factory=RateLimitSection)
     alerts: AlertsSection = Field(default_factory=AlertsSection)
     logging: LoggingSection = Field(default_factory=LoggingSection)
+    outbound: OutboundSection = Field(default_factory=OutboundSection)
     retention: RetentionSection = Field(default_factory=RetentionSection)
     platform_config: PlatformConfigSection = Field(default_factory=PlatformConfigSection)
 

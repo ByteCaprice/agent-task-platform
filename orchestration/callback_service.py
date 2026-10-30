@@ -15,7 +15,7 @@ from typing import Any
 import httpx
 
 from domain import AgentRun, CallbackDelivery, LogEvent, new_event_id, utc_now
-from domain.enums import CallbackStatus, RunStatus
+from domain.enums import CallbackStatus, ErrorType, RunStatus
 from framework.observability import log_json, safe_url
 from framework.tool.hooks import HookContext
 from infra.outbound_policy import OutboundPolicy, OutboundPolicyError
@@ -90,7 +90,7 @@ class CallbackService:
         previous_status = run.status
         run.callback_status = CallbackStatus.SKIPPED
         if run.status in {RunStatus.AGENT_SUCCEEDED, RunStatus.WAITING_CALLBACK}:
-            run.status = RunStatus.SUCCEEDED
+            run.status = self._settled_status(run)
         return self.store.runs.update_if_current(
             run,
             expected_statuses={previous_status},
@@ -140,7 +140,10 @@ class CallbackService:
         delivery.lease_expire_time = None
         previous_status = run.status
         run.callback_status = CallbackStatus.PENDING
-        run.status = RunStatus.WAITING_CALLBACK
+        # A failure/timeout remains an execution failure while notification is
+        # pending. Delivery state must never erase the business outcome.
+        if run.status in {RunStatus.AGENT_SUCCEEDED, RunStatus.SUCCEEDED}:
+            run.status = RunStatus.WAITING_CALLBACK
         if not self.store.update_run_with_callback(
             run,
             delivery=delivery,
@@ -198,13 +201,14 @@ class CallbackService:
                 delivery.last_error = None
                 delivery.worker = None
                 delivery.lease_expire_time = None
+                previous_status = run.status
                 run.callback_status = CallbackStatus.DELIVERED
-                run.status = RunStatus.SUCCEEDED
-                run.finish_time = utc_now()
+                run.status = self._settled_status(run)
+                run.finish_time = run.finish_time or utc_now()
                 if not self.store.update_run_with_callback(
                     run,
                     delivery=delivery,
-                    expected_statuses={RunStatus.WAITING_CALLBACK},
+                    expected_statuses={previous_status},
                 ):
                     self.store.callbacks.save(delivery)
                 self.store.logs.add(
@@ -253,11 +257,11 @@ class CallbackService:
                 if attempt < self.max_attempts:
                     await asyncio.sleep(self._delay_for_attempt(attempt))
 
+        previous_status = run.status
         run.callback_status = CallbackStatus.FAILED
-        run.status = RunStatus.WAITING_CALLBACK
         self.store.runs.update_if_current(
             run,
-            expected_statuses={RunStatus.WAITING_CALLBACK},
+            expected_statuses={previous_status},
         )
         delivery.worker = None
         delivery.lease_expire_time = None
@@ -332,7 +336,20 @@ class CallbackService:
         }
 
     @staticmethod
+    def _settled_status(run: AgentRun) -> RunStatus:
+        if run.status not in {RunStatus.AGENT_SUCCEEDED, RunStatus.WAITING_CALLBACK}:
+            return run.status
+        # Older releases placed failed executions in WAITING_CALLBACK too.
+        if run.error_type == ErrorType.RUN_TIMEOUT:
+            return RunStatus.TIMEOUT
+        if run.error_type is not None:
+            return RunStatus.FAILED
+        return RunStatus.SUCCEEDED
+
+    @staticmethod
     def _run_event(run: AgentRun) -> str:
+        if run.status == RunStatus.WAITING_CALLBACK and run.error_type is not None:
+            return "failed"
         if run.status in {RunStatus.SUCCEEDED, RunStatus.AGENT_SUCCEEDED, RunStatus.WAITING_CALLBACK}:
             return "succeeded"
         if run.status in {RunStatus.FAILED, RunStatus.TIMEOUT}:

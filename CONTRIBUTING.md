@@ -66,4 +66,4 @@ git diff -- sql/ddl.sql sql/seed.dml.sql
 
 ## Security Reports
 
-Do not publish credentials or exploit details in a public issue. Use the repository owner's private security-reporting channel when available. For ordinary hardening changes, explain the threat boundary and include a regression test.
+Do not publish credentials or exploit details in a public issue. Follow the private reporting options in [SECURITY.md](SECURITY.md). For ordinary hardening changes, explain the threat boundary and include a regression test. This pre-release project does not promise response or remediation timelines.

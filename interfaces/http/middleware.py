@@ -34,24 +34,22 @@ def install_request_logging_middleware(
 
     @app.middleware("http")
     async def _request_logging_middleware(request: Request, call_next):
-        body_limit = (
-            int(settings.get("logging", {}).get("max_body_chars", max_body_chars)) if settings else max_body_chars
-        )
+        logging_settings = settings.get("logging", {}) if settings else {}
+        body_limit = int(logging_settings.get("max_body_chars", max_body_chars))
+        log_payloads = bool(logging_settings.get("log_payloads", False))
         request_trace_id = request.headers.get(REQUEST_TRACE_HEADER) or new_request_trace_id()
         token = set_request_trace_id(request_trace_id)
         request.state.request_trace_id = request_trace_id
         started = time.perf_counter()
         try:
-            body = await request.body()
-            request_info = _request_info(request, body, request_trace_id, max_body_chars=body_limit)
+            body = await request.body() if log_payloads else b""
+            request_info = _request_info(
+                request, body, request_trace_id, max_body_chars=body_limit, include_payload=log_payloads
+            )
             logger.info("http request: %s", log_json(request_info, max_chars=body_limit))
 
-            async def receive() -> dict[str, Any]:
-                return {"type": "http.request", "body": body, "more_body": False}
-
-            replayed_request = Request(request.scope, receive)
             try:
-                response = await call_next(replayed_request)
+                response = await call_next(request)
             except Exception:
                 elapsed_ms = int((time.perf_counter() - started) * 1000)
                 logger.exception(
@@ -69,40 +67,28 @@ def install_request_logging_middleware(
                 )
                 raise
 
-            chunks = [chunk async for chunk in response.body_iterator]
-            response_body = b"".join(chunks)
             elapsed_ms = int((time.perf_counter() - started) * 1000)
-            response_info = _response_info(
-                request,
-                response,
-                response_body,
-                elapsed_ms,
-                request_trace_id,
-                max_body_chars=body_limit,
-            )
+            response_info = _response_info(request, response, elapsed_ms, request_trace_id)
             logger.info("http response: %s", log_json(response_info, max_chars=body_limit))
-
-            headers = dict(response.headers)
-            headers.pop("content-length", None)
-            headers[REQUEST_TRACE_HEADER] = request_trace_id
-            return Response(
-                content=response_body,
-                status_code=response.status_code,
-                headers=headers,
-                media_type=response.media_type,
-                background=response.background,
-            )
+            response.headers[REQUEST_TRACE_HEADER] = request_trace_id
+            return response
         finally:
             reset_request_trace_id(token)
 
 
-def _request_info(request: Request, body: bytes, request_trace_id: str, *, max_body_chars: int) -> dict[str, Any]:
-    parsed_body = _parse_body(body, request.headers.get("content-type", ""))
-    return {
+def _request_info(
+    request: Request,
+    body: bytes,
+    request_trace_id: str,
+    *,
+    max_body_chars: int,
+    include_payload: bool = False,
+) -> dict[str, Any]:
+    info = {
         "request_trace_id": request_trace_id,
         "method": request.method,
         "path": request.url.path,
-        "query": dict(request.query_params),
+        "query_keys": sorted(request.query_params.keys()),
         "headers": redact_for_log(
             {
                 "content-type": request.headers.get("content-type"),
@@ -110,27 +96,27 @@ def _request_info(request: Request, body: bytes, request_trace_id: str, *, max_b
                 "authorization": request.headers.get("authorization"),
             }
         ),
-        "body": _limit_body(parsed_body, max_body_chars=max_body_chars),
     }
+    if include_payload:
+        info["body"] = _limit_body(
+            _parse_body(body, request.headers.get("content-type", "")), max_body_chars=max_body_chars
+        )
+    return info
 
 
 def _response_info(
     request: Request,
     response: Response,
-    body: bytes,
     elapsed_ms: int,
     request_trace_id: str,
-    *,
-    max_body_chars: int,
 ) -> dict[str, Any]:
-    parsed_body = _parse_body(body, response.headers.get("content-type", ""))
     return {
         "request_trace_id": request_trace_id,
         "method": request.method,
         "path": request.url.path,
         "status": response.status_code,
         "elapsed_ms": elapsed_ms,
-        "body": _limit_body(parsed_body, max_body_chars=max_body_chars),
+        "content_type": response.headers.get("content-type"),
     }
 
 

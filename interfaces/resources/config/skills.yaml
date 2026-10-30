@@ -1,0 +1,4 @@
+skills:
+  - source_path: example-compliance
+    enabled: true
+    owner: example-maintainers

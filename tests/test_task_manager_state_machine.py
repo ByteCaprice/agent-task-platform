@@ -43,6 +43,7 @@ def test_task_manager_success_lifecycle_without_callback(tmp_path) -> None:
     assert [event.event_type for event in store.logs.for_run(submitted.run_id)] == [
         "run_submitted",
         "run_dequeued",
+        "skills_resolved",
         "agent_started",
         "agent_succeeded",
     ]
@@ -115,6 +116,8 @@ def test_task_manager_retry_resumes_from_failed_durable_stage(tmp_path) -> None:
     assert completed.status == RunStatus.SUCCEEDED
     assert completed.attempts == 2
     assert completed.output == {"value": 10, "reviewed": True}
+    assert completed.error_type is None
+    assert completed.error_message is None
     assert implementation.calls == ["prepare", "review", "review"]
     assert [stage.attempts for stage in store.stages.list_for_run(submitted.run_id)] == [1, 2]
 
@@ -334,6 +337,7 @@ def test_task_manager_recover_incomplete_requeues_running_task(tmp_path) -> None
     run.status = RunStatus.RUNNING
     run.attempts = 1
     run.worker = "worker-stale"
+    run.lease_expire_time = utc_now() - timedelta(seconds=1)
     store.runs.update(run)
     restarted: list[str] = []
     manager._start_background = restarted.append
@@ -346,6 +350,72 @@ def test_task_manager_recover_incomplete_requeues_running_task(tmp_path) -> None
     assert requeued.attempts == 0
     assert requeued.worker is None
     assert restarted == [submitted.run_id]
+
+
+def test_task_manager_recover_incomplete_preserves_valid_worker_lease(tmp_path) -> None:
+    manager, store = _manager(
+        tmp_path,
+        [AgentSpec(name="echo-agent", version="1.0.0", route_tags=["echo.test"], runtime={"type": "echo"})],
+    )
+    submitted = asyncio.run(
+        manager.submit(
+            RunSubmitRequest(
+                route_tag="echo.test",
+                request_id="example-live-recovery-lease",
+                input={},
+                caller="tester",
+            )
+        )
+    )
+    run = store.runs.get(submitted.run_id)
+    run.status = RunStatus.RUNNING
+    run.worker = "worker-live"
+    run.lease_expire_time = utc_now() + timedelta(seconds=30)
+    store.runs.update(run)
+    restarted: list[str] = []
+    manager._start_background = restarted.append
+
+    recovered = manager.recover_incomplete()
+
+    saved = store.runs.get(submitted.run_id)
+    assert recovered == 0
+    assert saved.status == RunStatus.RUNNING
+    assert saved.worker == "worker-live"
+    assert saved.lease_expire_time == run.lease_expire_time
+    assert restarted == []
+
+
+def test_task_manager_recover_skips_unavailable_route_and_continues(tmp_path) -> None:
+    manager, store = _manager(
+        tmp_path,
+        [AgentSpec(name="echo-agent", version="1.0.0", route_tags=["echo.test"], runtime={"type": "echo"})],
+    )
+    valid = asyncio.run(
+        manager.submit(RunSubmitRequest(route_tag="echo.test", request_id="recover-valid", input={}, caller="tester"))
+    )
+    unavailable = asyncio.run(
+        manager.submit(
+            RunSubmitRequest(route_tag="echo.test", request_id="recover-unavailable", input={}, caller="tester")
+        )
+    )
+    for run_id in (valid.run_id, unavailable.run_id):
+        run = store.runs.get(run_id)
+        run.status = RunStatus.RUNNING
+        run.worker = "worker-stale"
+        run.lease_expire_time = utc_now() - timedelta(seconds=1)
+        store.runs.update(run)
+    missing_route = store.runs.get(unavailable.run_id)
+    missing_route.route_tag = "route.missing"
+    store.runs.update(missing_route)
+    restarted: list[str] = []
+    manager._start_background = restarted.append
+
+    recovered = manager.recover_incomplete()
+
+    assert recovered == 1
+    assert restarted == [valid.run_id]
+    assert store.runs.get(unavailable.run_id).status == RunStatus.RUNNING
+    assert store.runs.get(valid.run_id).status == RunStatus.QUEUED
 
 
 def test_task_manager_dispatch_ready_skips_duplicate_active_background(tmp_path) -> None:
@@ -377,9 +447,11 @@ def test_task_manager_dispatch_ready_skips_duplicate_active_background(tmp_path)
 
             saved = store.runs.get(submitted.run_id)
             assert dispatched == 0
-            assert saved.status == RunStatus.RUNNING
-            assert saved.worker == "worker-1"
-            assert "background_start_skipped" in [event.event_type for event in store.logs.for_run(submitted.run_id)]
+            assert saved.status == RunStatus.QUEUED
+            assert saved.worker is None
+            assert "background_start_skipped" not in [
+                event.event_type for event in store.logs.for_run(submitted.run_id)
+            ]
         finally:
             blocker.set()
             await active
@@ -432,6 +504,40 @@ def test_task_manager_reclaim_expired_lease_skips_active_background(tmp_path) ->
     asyncio.run(scenario())
 
 
+def test_task_manager_reclaim_cas_does_not_overwrite_renewed_lease(tmp_path) -> None:
+    manager, store = _manager(
+        tmp_path,
+        [AgentSpec(name="echo-agent", version="1.0.0", route_tags=["echo.test"], runtime={"type": "echo"})],
+    )
+    submitted = asyncio.run(
+        manager.submit(
+            RunSubmitRequest(route_tag="echo.test", request_id="example-renewal-race", input={}, caller="tester")
+        )
+    )
+    run = store.runs.get(submitted.run_id)
+    run.status = RunStatus.RUNNING
+    run.worker = "worker-1"
+    run.lease_expire_time = utc_now() - timedelta(seconds=1)
+    store.runs.update(run)
+    original_update_if_current = store.runs.update_if_current
+    renewed_expiry = None
+
+    def renew_before_fenced_update(candidate, **kwargs):
+        nonlocal renewed_expiry
+        assert store.runs.renew_lease(candidate.run_id, worker_id="worker-1", lease_seconds=60)
+        renewed_expiry = store.runs.get(candidate.run_id).lease_expire_time
+        return original_update_if_current(candidate, **kwargs)
+
+    store.runs.update_if_current = renew_before_fenced_update
+    reclaimed = manager.reclaim_expired_leases(limit=10)
+
+    saved = store.runs.get(submitted.run_id)
+    assert reclaimed == 0
+    assert saved.status == RunStatus.RUNNING
+    assert saved.worker == "worker-1"
+    assert saved.lease_expire_time == renewed_expiry
+
+
 def test_task_manager_reclaim_expired_lease_requeues_inactive_background(tmp_path) -> None:
     manager, store = _manager(
         tmp_path,
@@ -463,6 +569,45 @@ def test_task_manager_reclaim_expired_lease_requeues_inactive_background(tmp_pat
     assert saved.worker is None
     assert saved.lease_expire_time is None
     assert store.logs.for_run(submitted.run_id)[-1].event_type == "lease_expired_reclaimed"
+
+
+def test_task_manager_stops_local_execution_after_lease_ownership_is_stolen(tmp_path) -> None:
+    async def scenario() -> None:
+        manager, store = _manager(
+            tmp_path,
+            [AgentSpec(name="slow-agent", version="1.0.0", route_tags=["slow.test"], runtime={"type": "echo"})],
+        )
+        runtime = _BlockingRuntime()
+        manager.runtime = runtime
+        submitted = await manager.submit(
+            RunSubmitRequest(
+                route_tag="slow.test",
+                request_id="example-stolen-lease",
+                input={},
+                caller="tester",
+            )
+        )
+
+        assert manager.dispatch_ready(worker_id="worker-old", lease_seconds=0.09, limit=1) == 1
+        await runtime.started.wait()
+        replacement = store.runs.get(submitted.run_id)
+        replacement.worker = "worker-new"
+        replacement.lease_expire_time = utc_now() + timedelta(seconds=60)
+        store.runs.update(replacement)
+
+        background = manager._background_by_run_id[submitted.run_id]
+        try:
+            await asyncio.wait_for(background, timeout=2)
+        except asyncio.CancelledError:
+            pass
+
+        saved = store.runs.get(submitted.run_id)
+        assert saved.status == RunStatus.RUNNING
+        assert saved.worker == "worker-new"
+        assert saved.output is None
+        assert not runtime.release.is_set()
+
+    asyncio.run(scenario())
 
 
 def test_task_manager_renews_worker_lease_while_background_task_runs(tmp_path) -> None:

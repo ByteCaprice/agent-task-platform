@@ -42,9 +42,9 @@ cp config/.env.dev.example config/.env.dev
 编辑 `config/.env.dev`，填入本地 PostgreSQL 连接信息，并替换 `REPLACE_WITH_LOCAL_KEY` 与 `REPLACE_WITH_LOCAL_CALLBACK_SECRET`。内置示例不需要模型服务或外部 API key。
 
 ```bash
-ENV_MODE=dev alembic upgrade head
+ENV_MODE=dev uv run alembic upgrade head
 ENV_MODE=dev psql agent_task_platform_dev -f sql/seed.dml.sql
-ENV_MODE=dev agent-task-platform serve
+ENV_MODE=dev uv run agent-task-platform serve --config-dir config
 ```
 
 在另一个终端运行离线示例：
@@ -118,9 +118,9 @@ uv run pytest -q
 uv run python scripts/gen_sql.py
 ```
 
-## 当前状态
+## 部署范围与当前状态
 
-项目正在准备首个公开版本。在发布稳定版本前，不应将当前 API、插件契约或数据库 Schema 视为长期稳定接口。
+项目正在准备首个公开版本。在发布稳定版本前，不应将当前 API、插件契约或数据库 Schema 视为长期稳定接口。项目面向可信的单租户部署，不提供租户隔离边界。PostgreSQL 持久化与恢复不保证外部副作用恰好执行一次；重试、取消、进程故障或远端响应不明确时，仍需应用级幂等处理和运维核查。Python 扩展是可信代码，不运行在沙箱中。
 
 ## 许可证
 

@@ -152,8 +152,10 @@ class FileClient:
         self._outbound_policy.validate(target_url)
         timeout = timeout_seconds or self._fetch_timeout
 
-        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True, max_redirects=5) as client:
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
             async with client.stream("GET", target_url) as response:
+                if 300 <= response.status_code < 400:
+                    raise FileFetchError("File fetch redirects are not allowed")
                 response.raise_for_status()
 
                 # Check Content-Length early if available

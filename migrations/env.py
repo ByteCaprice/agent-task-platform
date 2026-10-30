@@ -17,15 +17,19 @@ from pathlib import Path
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
-# Ensure project root is importable
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+# Find the installed project root as well as the source-checkout root. Packaged
+# migration scripts live below interfaces/resources/migrations rather than the
+# checkout's top-level migrations directory.
+project_root = next((parent for parent in Path(__file__).resolve().parents if (parent / "infra").is_dir()), None)
+if project_root is not None:
+    sys.path.insert(0, str(project_root))
 
 from infra.store.tables import metadata as target_metadata  # noqa: E402
 
 config = context.config
 
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 
 # ---------------------------------------------------------------------------

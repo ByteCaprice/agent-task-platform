@@ -7,6 +7,7 @@ name = "agent-task-platform"
 dynamic = ["version"]
 description = "A durable, task/run-oriented platform for building and operating production AI agents."
 readme = "README.md"
+license = "Apache-2.0"
 requires-python = ">=3.11"
 dependencies = [
   "fastapi>=0.110",
@@ -22,6 +23,10 @@ dependencies = [
   "packaging>=24",
   "uvicorn>=0.29",
 ]
+
+[project.urls]
+Homepage = "https://github.com/ByteCaprice/agent-task-platform"
+Repository = "https://github.com/ByteCaprice/agent-task-platform"
 
 [project.optional-dependencies]
 dev = [
@@ -50,6 +55,7 @@ exclude = ["tests*", "config*", "docs*", "var*", "*.node_modules*"]
 "interfaces.http" = ["dashboard/*.html", "dashboard/*.css", "dashboard/*.js"]
 "framework.runtime.pi" = ["node/*.mjs", "node/package.json", "node/package-lock.json"]
 "agent_hub.pi_multistep_demo" = ["*.md"]
+"interfaces.resources" = ["config/*.yaml", "config/*.example", "migrations/*.py", "migrations/*.mako", "migrations/*.md", "migrations/versions/*.py", "skills/**/*"]
 "plugins.skills" = ["**/*.md", "**/*.yaml", "**/*.json", "**/*.py"]
 
 [tool.pytest.ini_options]

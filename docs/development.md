@@ -96,13 +96,23 @@ Do not use `--noconftest` to claim the full suite passed; tests that require `pg
 
 ### Full PostgreSQL suite
 
-Start Docker, then run:
+The default test configuration uses Testcontainers. Start Docker, then run:
 
 ```bash
 uv run pytest -q
 ```
 
-The session fixture starts `postgres:16-alpine` with Testcontainers and truncates all platform tables between tests. If Docker is unavailable, report the PostgreSQL suite as not run rather than silently replacing it with a different backend.
+The session fixture starts `postgres:16-alpine` and truncates all platform tables between tests. If Docker is unavailable, report the PostgreSQL suite as not run rather than silently replacing it with a different backend.
+
+For an explicit local PostgreSQL alternative, set `ATP_TEST_DATABASE_URL` to a loopback PostgreSQL URL whose database name begins with `atp_test_`, for example `postgresql+psycopg2://user:password@127.0.0.1:5432/atp_test_local`. The test harness refuses non-loopback hosts and names outside that prefix. **This database is destructive test-only state:** the suite creates its schema and truncates every platform table before each test, with identity sequences restarted. Use a disposable database, never a development, shared, staging, or production database. With the variable unset, Testcontainers remains the default.
+
+### Packaging checks
+
+The packaging tests verify that packaged configuration, migration history, and Skill resources match their source copies:
+
+```bash
+uv run pytest --noconftest -q tests/test_packaging.py tests/test_doc_links.py
+```
 
 ### Pi checks
 
@@ -150,7 +160,7 @@ Alembic is the upgrade mechanism. `sql/ddl.sql` is a generated reference for an 
 - Prefer repository-relative links and commands that work from the project root.
 - Name the current limitation when a behavior is intentionally unsupported.
 - Keep the OpenAPI document as the field-level API authority; avoid duplicating every generated schema in prose.
-- Run a local link/path check before submitting the change.
+- Run `uv run python scripts/check_doc_links.py` before submitting the change.
 
 ## Before Opening a Pull Request
 
@@ -159,6 +169,9 @@ git diff --check
 uv run ruff check .
 uv run ruff format --check .
 uv run pytest -q
+uv run python scripts/check_doc_links.py
+uv run python scripts/gen_sql.py
+git diff --exit-code -- sql/ddl.sql sql/seed.dml.sql
 ```
 
 Then inspect `git status` for logs, credentials, local environment files, build output, or unrelated changes. See [Contributing](../CONTRIBUTING.md) for the review checklist.

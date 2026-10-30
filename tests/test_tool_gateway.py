@@ -173,6 +173,7 @@ def test_tool_gateway_http_protocol_returns_text_for_non_json_response(tmp_path)
         ),
         store=store,
         http_client=http_client,
+        trusted_private_http_endpoints=["https://tool.test/run"],
     )
 
     output = asyncio.run(
@@ -210,6 +211,7 @@ def test_tool_gateway_http_protocol_uses_tool_timeout(tmp_path) -> None:
         ),
         store=store,
         http_client=http_client,
+        trusted_private_http_endpoints=["https://tool.test/run"],
     )
 
     output = asyncio.run(
@@ -238,6 +240,7 @@ def test_tool_gateway_marks_non_success_business_code_separately(tmp_path, caplo
         ),
         store=store,
         http_client=_HttpClient(_JsonResponse(output)),
+        trusted_private_http_endpoints=["https://tool.test/run"],
     )
 
     logger = logging.getLogger("framework.tool.tools")
@@ -479,6 +482,7 @@ def test_tool_gateway_propagates_idempotency_key_to_http_tool(tmp_path) -> None:
         ),
         store=store,
         http_client=http_client,
+        trusted_private_http_endpoints=["https://tool.test/run"],
     )
 
     output = asyncio.run(

@@ -37,6 +37,7 @@ from framework.tool.hooks import HookContext, RunHooks
 from framework.tool.mcp import MCPError
 from framework.tool.resilience import CircuitBreaker, QpsLimiter
 from infra.coordination import CoordinationBackend, LocalCoordinationBackend, coordination_limited_slot
+from infra.outbound_policy import OutboundPolicy
 from infra.store import RunStore
 
 ToolHandler = Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]
@@ -56,12 +57,17 @@ class ToolGateway:
         hooks: RunHooks | None = None,
         http_client: Any | None = None,
         coordination: CoordinationBackend | None = None,
+        trusted_private_http_endpoints: list[str] | None = None,
     ) -> None:
         self.registry = registry
         self.store = store
         self.hooks = hooks
         self.http_client = http_client or httpx.AsyncClient(timeout=60)
         self.coordination = coordination or LocalCoordinationBackend()
+        self._outbound_policy = OutboundPolicy(
+            block_private_networks=True,
+            private_network_allowlist=trusted_private_http_endpoints or [],
+        )
         self._lock = threading.RLock()
         self._failure_handlers: dict[str, ToolFailureHandler] = {}
         self._semaphores = {tool.name: asyncio.Semaphore(tool.max_concurrency) for tool in registry.list()}
@@ -528,12 +534,16 @@ class ToolGateway:
             return await self._invoke_mcp(endpoint, input_data)
         if protocol == "http":
             url = endpoint["url"]
+            try:
+                self._outbound_policy.validate(url)
+            except ValueError as exc:
+                raise RegistryError(f"HTTP Tool endpoint rejected by outbound policy: {exc}") from exc
             method = endpoint.get("method", "POST").upper()
             headers = _headers_for_endpoint(endpoint)
             if idempotency_key and idempotency_key_header:
                 headers[idempotency_key_header] = idempotency_key
             started = time.perf_counter()
-            logger.info("http tool request: method=%s url=%s body=%s", method, safe_url(url), log_json(input_data))
+            logger.info("http tool request: method=%s url=%s", method, safe_url(url))
             response = await self.http_client.request(
                 method,
                 url,
